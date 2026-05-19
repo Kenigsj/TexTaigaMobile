@@ -1,0 +1,43 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Keep Gradle wrapper files
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Local Android configuration
+local.properties
+
+# Local SDK / downloaded tools
+tools/
+
+# Build artifacts
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Signing files and local secrets
+*.jks
+*.keystore
+keystore.properties
+
+# Native / generated Android folders
+.cxx/
+.externalNativeBuild/
+captures/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
