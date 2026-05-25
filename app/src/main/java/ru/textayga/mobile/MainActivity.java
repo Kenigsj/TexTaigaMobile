@@ -4,14 +4,18 @@ import android.app.Activity;
 import android.app.DatePickerDialog;
 import android.app.Dialog;
 import android.content.Intent;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.view.Gravity;
+import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.content.Context;
 import android.widget.DatePicker;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -20,7 +24,6 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.YearMonth;
-import java.util.ArrayList;
 import java.util.UUID;
 
 import ru.textayga.mobile.data.BudgetRepository;
@@ -30,9 +33,11 @@ import ru.textayga.mobile.domain.Money;
 import ru.textayga.mobile.domain.Periods;
 import ru.textayga.mobile.model.Category;
 import ru.textayga.mobile.model.CategoryType;
+import ru.textayga.mobile.model.BalanceViewMode;
 import ru.textayga.mobile.model.DateRange;
 import ru.textayga.mobile.model.ExportFormat;
 import ru.textayga.mobile.model.ExportRangeMode;
+import ru.textayga.mobile.model.FactAction;
 import ru.textayga.mobile.model.FactEntry;
 import ru.textayga.mobile.model.PeriodChoice;
 import ru.textayga.mobile.model.PlanViewMode;
@@ -63,12 +68,17 @@ public class MainActivity extends Activity implements NavListener {
     public String settingsTab = "categories";
     public CategoryType categoryFilter = null;
     public CategoryType balanceFilter = null;
+    public BalanceViewMode balanceViewMode = BalanceViewMode.WEEK;
+    // депозиты и займы в бюджете свернуты отдельно, чтобы таблица не становилась простыней
+    public boolean balanceDepositsExpanded = false;
+    public boolean balanceLoansExpanded = false;
     public CategoryType planFilter = null;
     public PlanViewMode planMode = PlanViewMode.WEEK;
     public String balancePeriodKey;
     public String planPeriodKey;
     public String factPeriodKey;
     public String factCategoryId;
+    public FactAction factAction = FactAction.NONE;
     public String factPayment = "Карта";
     public String factAmountDraft = "";
     public String factExpressionDraft = "";
@@ -82,6 +92,14 @@ public class MainActivity extends Activity implements NavListener {
     public boolean includeFact = true;
     public boolean includeBalance = true;
     public boolean includeComments = true;
+
+    // запоминаю вертикальный скролл, иначе экран прыгает наверх после showFact/showPlan
+    private int balanceScrollY = 0;
+    private int planScrollY = 0;
+    private int factScrollY = 0;
+    private int exportScrollY = 0;
+    private int settingsScrollY = 0;
+    private NavTarget scrollOwner = NavTarget.BALANCE;
 
     private byte[] pendingExportBytes;
     private String pendingExportMime;
@@ -120,6 +138,8 @@ public class MainActivity extends Activity implements NavListener {
             Category category = repository.firstCategory(CategoryType.EXPENSE);
             factCategoryId = category == null ? null : category.id;
         }
+        // действие факта всегда подгоняю под выбранный тип статьи
+        syncFactAction();
         if (repository.data().paymentTypes.isEmpty()) repository.data().paymentTypes.add("Карта");
         if (factPayment == null || !repository.data().paymentTypes.contains(factPayment)) {
             factPayment = repository.data().paymentTypes.get(0);
@@ -138,28 +158,72 @@ public class MainActivity extends Activity implements NavListener {
 
     // пересобираю экран целиком, так меньше мороки
     public void showBalance() {
-        activeTarget = NavTarget.BALANCE;
-        setContentView(new BalanceScreen().render(this));
+        showScreen(NavTarget.BALANCE, new BalanceScreen().render(this), true);
     }
 
     public void showPlan() {
-        activeTarget = NavTarget.PLAN;
-        setContentView(new PlanScreen().render(this));
+        showScreen(NavTarget.PLAN, new PlanScreen().render(this), true);
     }
 
     public void showFact() {
-        activeTarget = NavTarget.FACT;
-        setContentView(new FactScreen().render(this));
+        showScreen(NavTarget.FACT, new FactScreen().render(this), true);
     }
 
     public void showExport() {
-        activeTarget = NavTarget.EXPORT;
-        setContentView(new ExportScreen().render(this));
+        showScreen(NavTarget.EXPORT, new ExportScreen().render(this), true);
     }
 
     public void showSettings() {
-        activeTarget = NavTarget.SETTINGS;
-        setContentView(new SettingsScreen().render(this));
+        showScreen(NavTarget.SETTINGS, new SettingsScreen().render(this), true);
+    }
+
+    // для деталей бюджета и сверки: старый скролл сохраняю, новый экран открываю сверху
+    public void showTemporaryScreen(NavTarget owner, View root) {
+        showScreen(owner, root, false);
+    }
+
+    // общий показ экрана, чтобы не терять место, где пользователь был до клика
+    private void showScreen(NavTarget target, View root, boolean restoreScroll) {
+        saveCurrentScroll();
+        activeTarget = target;
+        scrollOwner = restoreScroll ? target : null;
+        setContentView(root);
+        if (restoreScroll) restoreScroll(target);
+    }
+
+    // перед заменой view забираю scrollY у текущего экрана
+    private void saveCurrentScroll() {
+        if (scrollOwner == null) return;
+        ScrollView scroll = findViewById(UiKit.MAIN_SCROLL_ID);
+        if (scroll == null) return;
+        putScroll(scrollOwner, scroll.getScrollY());
+    }
+
+    // после setContentView жду layout, потом возвращаю прошлую позицию
+    private void restoreScroll(NavTarget target) {
+        ScrollView scroll = findViewById(UiKit.MAIN_SCROLL_ID);
+        if (scroll == null) return;
+        int y = getScroll(target);
+        scroll.post(() -> scroll.scrollTo(0, y));
+    }
+
+    // храню позиции отдельно, потому что у каждой вкладки своя длина экрана
+    private void putScroll(NavTarget target, int y) {
+        if (target == NavTarget.BALANCE) balanceScrollY = y;
+        if (target == NavTarget.PLAN) planScrollY = y;
+        if (target == NavTarget.FACT) factScrollY = y;
+        if (target == NavTarget.EXPORT) exportScrollY = y;
+        if (target == NavTarget.SETTINGS) settingsScrollY = y;
+    }
+
+    // вытаскиваю сохраненный scrollY для нужной вкладки
+    private int getScroll(NavTarget target) {
+        if (target == NavTarget.BALANCE) return balanceScrollY;
+        if (target == NavTarget.PLAN) return planScrollY;
+        if (target == NavTarget.FACT) return factScrollY;
+        if (target == NavTarget.EXPORT) return exportScrollY;
+        if (target == NavTarget.SETTINGS) return settingsScrollY;
+        return 0;
     }
 
     public void showPeriodPicker(String title, java.util.List<PeriodChoice> choices, String selected, AppDialogs.PeriodCallback callback) {
@@ -173,16 +237,44 @@ public class MainActivity extends Activity implements NavListener {
 
     // в факт даю только неархивные статьи
     public void showCategoryPicker() {
-        ArrayList<String> labels = new ArrayList<>();
+        Dialog dialog = dialogs.dialog();
+        LinearLayout box = dialogs.dialogBox();
+        box.addView(dialogs.title("Выберите статью", dialog));
+        boolean hasItems = false;
         for (Category category : repository.data().categories) {
-            if (!category.archived) labels.add(category.name);
+            if (category.archived) continue;
+            hasItems = true;
+            box.addView(categoryChoiceRow(dialog, category));
         }
-        showChoiceDialog("Выберите статью", labels.toArray(new String[0]), label -> {
-            for (Category category : repository.data().categories) {
-                if (category.name.equals(label)) factCategoryId = category.id;
-            }
+        if (!hasItems) box.addView(ui.emptyText("Нет доступных статей"));
+        dialog.setContentView(dialogs.wrap(box));
+        dialogs.show(dialog);
+    }
+
+    // цветной пункт в выборе статьи, чтобы тип было видно сразу
+    private TextView categoryChoiceRow(Dialog dialog, Category category) {
+        TextView row = ui.label(category.name + "  ˅", 18, ui.colorFor(category.type), android.graphics.Typeface.BOLD);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(ui.dp(16), 0, ui.dp(16), 0);
+        row.setBackground(ui.bg(softCategoryColor(category.type), 8, ui.colorFor(category.type), 1));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, ui.dp(58));
+        lp.setMargins(0, ui.dp(8), 0, 0);
+        row.setLayoutParams(lp);
+        row.setOnClickListener(v -> {
+            factCategoryId = category.id;
+            syncFactAction();
+            dialog.dismiss();
             showFact();
         });
+        return row;
+    }
+
+    // мягкий фон под цвет типа статьи, чтобы не било по глазам
+    private int softCategoryColor(CategoryType type) {
+        if (type == CategoryType.INCOME) return Color.rgb(235, 252, 244);
+        if (type == CategoryType.EXPENSE) return Color.rgb(255, 244, 245);
+        if (type == CategoryType.LOAN) return Color.rgb(246, 241, 255);
+        return Color.rgb(237, 245, 255);
     }
 
     // кнопка сохранить факт
@@ -208,6 +300,7 @@ public class MainActivity extends Activity implements NavListener {
         fact.date = range.contains(today) ? today.toString() : range.start.toString();
         fact.amount = amount;
         fact.payment = factPayment;
+        fact.action = factAction;
         fact.comment = factCommentDraft == null ? "" : factCommentDraft;
         repository.data().facts.add(fact);
         repository.save();
@@ -216,6 +309,23 @@ public class MainActivity extends Activity implements NavListener {
         factExpressionDraft = "";
         factCommentDraft = "";
         dialogs.ready("Операция сохранена", "Баланс периода пересчитан.", this::showBalance);
+    }
+
+    // если выбрали депозит или займ, ставлю нормальное действие для этой статьи
+    public void syncFactAction() {
+        Category category = repository.findCategory(factCategoryId);
+        if (category == null) {
+            factAction = FactAction.NONE;
+            return;
+        }
+        if (category.type == CategoryType.DEPOSIT && factAction != FactAction.DEPOSIT_ADD && factAction != FactAction.DEPOSIT_WITHDRAW) {
+            factAction = FactAction.DEPOSIT_ADD;
+        } else if (category.type == CategoryType.LOAN && factAction != FactAction.LOAN_RECEIVE && factAction != FactAction.LOAN_REPAY) {
+            // при выборе кредита сначала показываю "получить займ", это основной сценарий добавления долга
+            factAction = FactAction.LOAN_RECEIVE;
+        } else if (category.type == CategoryType.INCOME || category.type == CategoryType.EXPENSE) {
+            factAction = FactAction.NONE;
+        }
     }
 
     // калькулятор собираю обычной строкой

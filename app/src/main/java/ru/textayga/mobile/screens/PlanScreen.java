@@ -14,6 +14,7 @@ import android.widget.TableRow;
 import android.widget.TextView;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +24,7 @@ import ru.textayga.mobile.domain.Money;
 import ru.textayga.mobile.domain.Periods;
 import ru.textayga.mobile.model.Category;
 import ru.textayga.mobile.model.CategoryType;
+import ru.textayga.mobile.model.DateRange;
 import ru.textayga.mobile.model.PeriodBalance;
 import ru.textayga.mobile.model.PeriodChoice;
 import ru.textayga.mobile.model.PlanViewMode;
@@ -34,17 +36,26 @@ public class PlanScreen implements AppScreen {
     @Override
     public View render(MainActivity host) {
         // после смены режима старый ключ может не подойти
-        if (host.planMode != PlanViewMode.ALL && !host.planPeriodKey.startsWith(host.planMode.prefix)) {
+        if (host.planMode == PlanViewMode.WEEK && !isMonthKey(host.planPeriodKey)) {
+            // в режиме недель теперь выбираю месяц, а внутри уже показываю его недели
+            host.planPeriodKey = Periods.monthKey(YearMonth.now());
+        } else if (host.planMode != PlanViewMode.ALL && host.planMode != PlanViewMode.WEEK && !host.planPeriodKey.startsWith(host.planMode.prefix)) {
             host.planPeriodKey = Periods.keyFor(LocalDate.now(), host.planMode);
         }
         UiKit.Screen screen = host.ui.screen("план", "План", "", host.ui.iconButton("▽", v -> showFilter(host)), NavTarget.PLAN, host);
         // верхние кнопки: период и режим
         LinearLayout controls = host.ui.row();
         controls.setPadding(0, host.ui.dp(8), 0, host.ui.dp(10));
-        TextView periodButton = host.ui.fieldButton(host.planMode == PlanViewMode.ALL ? "Всё время" : Periods.label(host.planPeriodKey), "▣");
+        TextView periodButton = host.ui.fieldButton(planPeriodTitle(host), "▣");
         periodButton.setOnClickListener(v -> {
             if (host.planMode == PlanViewMode.ALL) {
                 host.toast("Для режима «Всё время» период не выбирается");
+            } else if (host.planMode == PlanViewMode.WEEK) {
+                // недельный план выбирается через месяц, чтобы таблица была как в бюджете
+                host.showPeriodPicker("Выберите месяц", Periods.monthChoices(36, 12), Periods.monthKey(selectedPlanMonth(host)), choice -> {
+                    host.planPeriodKey = choice.key;
+                    host.showPlan();
+                });
             } else {
                 host.showPeriodPicker("Выберите период", Periods.planChoices(host.planMode), host.planPeriodKey, choice -> {
                     host.planPeriodKey = choice.key;
@@ -58,7 +69,8 @@ public class PlanScreen implements AppScreen {
             if ("Месяцы".equals(label)) host.planMode = PlanViewMode.MONTH;
             if ("Годы".equals(label)) host.planMode = PlanViewMode.YEAR;
             if ("Всё время".equals(label)) host.planMode = PlanViewMode.ALL;
-            host.planPeriodKey = Periods.keyFor(LocalDate.now(), host.planMode == PlanViewMode.ALL ? PlanViewMode.WEEK : host.planMode);
+            // для недель слева нужен месяц, для остальных режимов оставляю старую механику
+            host.planPeriodKey = host.planMode == PlanViewMode.WEEK ? Periods.monthKey(YearMonth.now()) : Periods.keyFor(LocalDate.now(), host.planMode == PlanViewMode.ALL ? PlanViewMode.WEEK : host.planMode);
             host.showPlan();
         }));
         controls.addView(periodButton, new LinearLayout.LayoutParams(0, host.ui.dp(58), 1));
@@ -71,40 +83,64 @@ public class PlanScreen implements AppScreen {
         return screen.root;
     }
 
-    // таблица плана: строки статьи, столбцы периоды
+    // таблица плана, первый столбец стоит на месте, периоды ездят отдельно
     private View planTable(MainActivity host) {
-        HorizontalScrollView horizontalScroll = new HorizontalScrollView(host);
-        horizontalScroll.setFillViewport(true);
-        horizontalScroll.setPadding(0, host.ui.dp(14), 0, 0);
-        TableLayout table = new TableLayout(host);
-        table.setBackground(host.ui.bg(android.graphics.Color.WHITE, 8, UiKit.LINE, 1));
+        int firstColumnWidth = 154;
+        int periodWidth = 112;
+        int headerHeight = 68;
+        int sectionHeight = 48;
+        // строки делаю выше, потому что длинные статьи переносятся и иначе низ букв режется
+        int rowHeight = 68;
+
+        LinearLayout tableFrame = new LinearLayout(host);
+        tableFrame.setOrientation(LinearLayout.HORIZONTAL);
+        tableFrame.setBackground(host.ui.bg(android.graphics.Color.WHITE, 8, UiKit.LINE, 1));
+        LinearLayout.LayoutParams frameLp = new LinearLayout.LayoutParams(-1, -2);
+        frameLp.setMargins(0, host.ui.dp(14), 0, 0);
+        tableFrame.setLayoutParams(frameLp);
+
+        TableLayout fixedTable = new TableLayout(host);
+        TableLayout scrollTable = new TableLayout(host);
         List<PeriodChoice> periods = visiblePeriods(host);
 
-        TableRow header = tableRow(host);
-        header.addView(cell(host, "Статья", UiKit.INK, Typeface.BOLD, true, 136));
-        for (PeriodChoice period : periods) header.addView(cell(host, period.shortLabel, UiKit.INK, Typeface.BOLD, false, 110));
-        table.addView(header);
+        TableRow fixedHeader = tableRow(host);
+        fixedHeader.addView(cell(host, "Статья", UiKit.INK, Typeface.BOLD, true, firstColumnWidth, headerHeight));
+        fixedTable.addView(fixedHeader);
 
-        addSection(host, table, "ДОХОДЫ", CategoryType.INCOME, periods);
-        addSection(host, table, "РАСХОДЫ", CategoryType.EXPENSE, periods);
-        addSection(host, table, "ПЕРЕМЕЩЕНИЯ", CategoryType.TRANSFER, periods);
+        TableRow scrollHeader = tableRow(host);
+        for (PeriodChoice period : periods) scrollHeader.addView(cell(host, period.shortLabel, UiKit.INK, Typeface.BOLD, false, periodWidth, headerHeight));
+        scrollTable.addView(scrollHeader);
 
+        addSection(host, fixedTable, scrollTable, "ДОХОДЫ", CategoryType.INCOME, periods, firstColumnWidth, periodWidth, sectionHeight, rowHeight);
+        addSection(host, fixedTable, scrollTable, "РАСХОДЫ", CategoryType.EXPENSE, periods, firstColumnWidth, periodWidth, sectionHeight, rowHeight);
+        addSection(host, fixedTable, scrollTable, "ДЕПОЗИТЫ", CategoryType.DEPOSIT, periods, firstColumnWidth, periodWidth, sectionHeight, rowHeight);
+        addSection(host, fixedTable, scrollTable, "ЗАЙМЫ", CategoryType.LOAN, periods, firstColumnWidth, periodWidth, sectionHeight, rowHeight);
+
+        // лишние строки "план доходы/факт расходы" убрал, в плане нужен только ввод статей и итог
         Map<String, PeriodBalance> balances = balanceMap(host, periods);
-        addBalanceRow(host, table, "ПЛАН ДОХОДЫ", periods, balances, UiKit.GREEN, balance -> balance.planIncome);
-        addBalanceRow(host, table, "ПЛАН РАСХОДЫ", periods, balances, UiKit.RED, balance -> balance.planExpense);
-        addBalanceRow(host, table, "ФАКТ ДОХОДЫ", periods, balances, UiKit.GREEN, balance -> balance.factIncome);
-        addBalanceRow(host, table, "ФАКТ РАСХОДЫ", periods, balances, UiKit.RED, balance -> balance.factExpense);
-        TableRow totals = tableRow(host);
-        totals.setBackgroundColor(android.graphics.Color.rgb(234, 252, 242));
-        totals.addView(cell(host, "ИТОГОВЫЙ БАЛАНС", UiKit.GREEN, Typeface.BOLD, true, 136));
+
+        TableRow fixedTotals = tableRow(host);
+        // фон всей строки не ставлю, иначе справа от таблицы появляется лишний зелёный кусок
+        fixedTotals.addView(cell(host, "ИТОГОВЫЙ БАЛАНС", UiKit.GREEN, Typeface.BOLD, true, firstColumnWidth, rowHeight));
+        fixedTable.addView(fixedTotals);
+
+        TableRow scrollTotals = tableRow(host);
+        // тут тоже без фона строки, красим только сами ячейки
         for (PeriodChoice period : periods) {
             PeriodBalance periodBalance = balances.get(period.key);
             double amount = periodBalance == null ? 0 : periodBalance.closingBalance;
-            totals.addView(cell(host, Money.amount(amount), amount >= 0 ? UiKit.GREEN : host.ui.negativeColor(host.repository.data().negativeBalanceColor), Typeface.BOLD, false, 110));
+            scrollTotals.addView(cell(host, Money.amount(amount), amount >= 0 ? UiKit.GREEN : host.ui.negativeColor(host.repository.data().negativeBalanceColor), Typeface.BOLD, false, periodWidth, rowHeight));
         }
-        table.addView(totals);
-        horizontalScroll.addView(table, new HorizontalScrollView.LayoutParams(-2, -2));
-        return horizontalScroll;
+        scrollTable.addView(scrollTotals);
+
+        HorizontalScrollView horizontalScroll = new HorizontalScrollView(host);
+        horizontalScroll.setFillViewport(true);
+        horizontalScroll.setHorizontalScrollBarEnabled(true);
+        horizontalScroll.addView(scrollTable, new HorizontalScrollView.LayoutParams(-2, -2));
+
+        tableFrame.addView(fixedTable, new LinearLayout.LayoutParams(host.ui.dp(firstColumnWidth), -2));
+        tableFrame.addView(horizontalScroll, new LinearLayout.LayoutParams(0, -2, 1));
+        return tableFrame;
     }
 
     // баланс снизу, чтоб сразу видеть итог
@@ -116,50 +152,65 @@ public class PlanScreen implements AppScreen {
         return map;
     }
 
-    // строка сводки: доходы, расходы и т.д
-    private void addBalanceRow(MainActivity host, TableLayout table, String title, List<PeriodChoice> periods, Map<String, PeriodBalance> balances, int color, BalanceValue value) {
-        TableRow row = tableRow(host);
-        row.addView(cell(host, title, color, Typeface.BOLD, true, 136));
-        for (PeriodChoice period : periods) {
-            PeriodBalance balance = balances.get(period.key);
-            double amount = balance == null ? 0 : value.amount(balance);
-            row.addView(cell(host, amount == 0 ? "—" : Money.amount(amount), color, Typeface.BOLD, false, 110));
-        }
-        table.addView(row);
-    }
-
     // секция таблицы по типу статьи
-    private void addSection(MainActivity host, TableLayout table, String title, CategoryType type, List<PeriodChoice> periods) {
+    private void addSection(MainActivity host, TableLayout fixedTable, TableLayout scrollTable, String title, CategoryType type, List<PeriodChoice> periods, int firstColumnWidth, int periodWidth, int sectionHeight, int rowHeight) {
         if (host.planFilter != null && host.planFilter != type) return;
-        TableRow section = tableRow(host);
-        section.addView(cell(host, title, host.ui.colorFor(type), Typeface.BOLD, true, 136));
-        for (int i = 0; i < periods.size(); i++) section.addView(cell(host, "", host.ui.colorFor(type), Typeface.BOLD, false, 110));
-        table.addView(section);
+        TableRow fixedSection = tableRow(host);
+        fixedSection.addView(cell(host, title, host.ui.colorFor(type), Typeface.BOLD, true, firstColumnWidth, sectionHeight));
+        fixedTable.addView(fixedSection);
+
+        TableRow scrollSection = tableRow(host);
+        for (int i = 0; i < periods.size(); i++) scrollSection.addView(cell(host, "", host.ui.colorFor(type), Typeface.BOLD, false, periodWidth, sectionHeight));
+        scrollTable.addView(scrollSection);
+
         for (Category category : host.repository.data().categories) {
             if (category.archived || category.type != type) continue;
-            TableRow row = tableRow(host);
-            row.addView(cell(host, category.name, UiKit.INK, Typeface.BOLD, true, 136));
+            TableRow fixedRow = tableRow(host);
+            fixedRow.addView(cell(host, category.name, UiKit.INK, Typeface.BOLD, true, firstColumnWidth, rowHeight));
+            fixedTable.addView(fixedRow);
+
+            TableRow scrollRow = tableRow(host);
             for (PeriodChoice period : periods) {
                 double amount = host.calculator.planAmount(category.id, period.key);
                 // тап по ячейке - ввод суммы и коммента
-                TextView value = cell(host, amount > 0 ? Money.amount(amount) : "—", host.ui.colorFor(type), Typeface.BOLD, false, 110);
+                TextView value = cell(host, amount > 0 ? Money.amount(amount) : "—", host.ui.colorFor(type), Typeface.BOLD, false, periodWidth, rowHeight);
                 value.setOnClickListener(v -> editAmount(host, category, period));
-                row.addView(value);
+                scrollRow.addView(value);
             }
-            table.addView(row);
+            scrollTable.addView(scrollRow);
         }
     }
 
     // неделя/месяц/год показывают выбранное, все время раскрывает недели
     private List<PeriodChoice> visiblePeriods(MainActivity host) {
-        if (host.planMode == PlanViewMode.ALL) return Periods.allTimeWeeks(host.calculator.firstFactDate());
-        return java.util.Collections.singletonList(new PeriodChoice(
-                host.planPeriodKey,
-                Periods.label(host.planPeriodKey),
-                Periods.shortLabel(host.planPeriodKey),
-                Periods.rangeForKey(host.planPeriodKey).start,
-                Periods.rangeForKey(host.planPeriodKey).end
-        ));
+        if (host.planMode == PlanViewMode.WEEK) return Periods.weeksForMonth(selectedPlanMonth(host));
+        if (host.planMode == PlanViewMode.ALL) return Periods.weeksBetween(host.calculator.firstFactDate(), LocalDate.now().plusWeeks(52));
+        DateRange selected = Periods.rangeForKey(host.planPeriodKey);
+        java.util.ArrayList<PeriodChoice> result = new java.util.ArrayList<>();
+        for (PeriodChoice period : Periods.planChoices(host.planMode)) {
+            // план нельзя резать текущей неделей, поэтому беру выбранный период и всё будущее
+            if (!period.start.isBefore(selected.start)) result.add(period);
+        }
+        result.sort(java.util.Comparator.comparing(period -> period.start));
+        return result;
+    }
+
+    // название левой кнопки, чтобы не показывать неделю там, где теперь выбирается месяц
+    private String planPeriodTitle(MainActivity host) {
+        if (host.planMode == PlanViewMode.ALL) return "Всё время";
+        if (host.planMode == PlanViewMode.WEEK) return Periods.monthYearLabel(selectedPlanMonth(host));
+        return Periods.label(host.planPeriodKey);
+    }
+
+    // в planPeriodKey для недель храню месяц, поэтому достаю его отдельно
+    private YearMonth selectedPlanMonth(MainActivity host) {
+        if (isMonthKey(host.planPeriodKey)) return YearMonth.parse(host.planPeriodKey.substring(2));
+        return YearMonth.now();
+    }
+
+    // маленькая проверка ключа, чтобы не словить parse на старом W:
+    private boolean isMonthKey(String key) {
+        return key != null && key.startsWith("M:");
     }
 
     // диалог одной ячейки плана
@@ -201,7 +252,8 @@ public class PlanScreen implements AppScreen {
 
     // копирую сумму в будущие периоды
     private void fillAllPeriods(MainActivity host, Category category, PeriodChoice selected, double amount, String comment) {
-        List<PeriodChoice> periods = host.planMode == PlanViewMode.ALL ? Periods.allTimeWeeks(host.calculator.firstFactDate()) : Periods.planChoices(host.planMode);
+        // если открыт месяц с неделями, повторяю только внутри видимой месячной сетки
+        List<PeriodChoice> periods = host.planMode == PlanViewMode.WEEK ? Periods.weeksForMonth(selectedPlanMonth(host)) : host.planMode == PlanViewMode.ALL ? Periods.weeksBetween(host.calculator.firstFactDate(), LocalDate.now().plusWeeks(52)) : Periods.planChoices(host.planMode);
         for (PeriodChoice period : periods) {
             if (!period.start.isBefore(selected.start)) {
                 host.calculator.setPlanAmount(category.id, period.key, amount, comment);
@@ -212,11 +264,12 @@ public class PlanScreen implements AppScreen {
 
     // фильтр таблицы плана по типу статей
     private void showFilter(MainActivity host) {
-        host.showChoiceDialog("Фильтр таблицы", new String[]{"Показать все статьи", "Только доходы", "Только расходы", "Только перемещения"}, label -> {
+        host.showChoiceDialog("Фильтр таблицы", new String[]{"Показать все статьи", "Только доходы", "Только расходы", "Только депозиты", "Только займы"}, label -> {
             if ("Показать все статьи".equals(label)) host.planFilter = null;
             if ("Только доходы".equals(label)) host.planFilter = CategoryType.INCOME;
             if ("Только расходы".equals(label)) host.planFilter = CategoryType.EXPENSE;
-            if ("Только перемещения".equals(label)) host.planFilter = CategoryType.TRANSFER;
+            if ("Только депозиты".equals(label)) host.planFilter = CategoryType.DEPOSIT;
+            if ("Только займы".equals(label)) host.planFilter = CategoryType.LOAN;
             host.showPlan();
         });
     }
@@ -232,7 +285,8 @@ public class PlanScreen implements AppScreen {
         legend.setLayoutParams(lp);
         legend.addView(host.ui.label("● Доходы", 13, UiKit.GREEN, Typeface.NORMAL), new LinearLayout.LayoutParams(0, -2, 1));
         legend.addView(host.ui.label("● Расходы", 13, UiKit.RED, Typeface.NORMAL), new LinearLayout.LayoutParams(0, -2, 1));
-        legend.addView(host.ui.label("● Перемещения", 13, UiKit.BLUE, Typeface.NORMAL), new LinearLayout.LayoutParams(0, -2, 1));
+        legend.addView(host.ui.label("● Депозиты", 13, UiKit.BLUE, Typeface.NORMAL), new LinearLayout.LayoutParams(0, -2, 1));
+        legend.addView(host.ui.label("● Займы", 13, UiKit.PURPLE, Typeface.NORMAL), new LinearLayout.LayoutParams(0, -2, 1));
         return legend;
     }
 
@@ -244,18 +298,16 @@ public class PlanScreen implements AppScreen {
     }
 
     // стиль ячеек плана, чтоб не разъезжались
-    private TextView cell(MainActivity host, String text, int color, int style, boolean left, int widthDp) {
+    private TextView cell(MainActivity host, String text, int color, int style, boolean left, int widthDp, int heightDp) {
         TextView cell = host.ui.label(text, 15, color, style);
         cell.setGravity(left ? Gravity.CENTER_VERTICAL : Gravity.CENTER);
         cell.setSingleLine(false);
+        cell.setMaxLines(3);
         cell.setPadding(host.ui.dp(10), host.ui.dp(10), host.ui.dp(10), host.ui.dp(10));
+        cell.setLayoutParams(new TableRow.LayoutParams(host.ui.dp(widthDp), host.ui.dp(heightDp)));
         cell.setMinWidth(host.ui.dp(widthDp));
+        cell.setMinHeight(host.ui.dp(heightDp));
         cell.setBackground(host.ui.bg(android.graphics.Color.WHITE, 0, UiKit.LINE, 1));
         return cell;
-    }
-
-    // маленький интерфейс, чтоб доставать разные поля periodbalance
-    private interface BalanceValue {
-        double amount(PeriodBalance balance);
     }
 }

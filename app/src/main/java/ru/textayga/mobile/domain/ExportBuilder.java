@@ -26,6 +26,7 @@ public class ExportBuilder {
     private static final int BLUE = Color.rgb(37, 99, 235);
     private static final int GREEN = Color.rgb(18, 184, 112);
     private static final int RED = Color.rgb(255, 45, 58);
+    private static final int PURPLE = Color.rgb(124, 58, 237);
 
     private final BudgetRepository repository;
     private final BudgetCalculator calculator;
@@ -39,7 +40,7 @@ public class ExportBuilder {
     // csv делаю через excel так лучше ест русский файл
     public String buildCsv(DateRange range, boolean includePlan, boolean includeFact, boolean includeBalance, boolean includeComments) {
         StringBuilder csv = new StringBuilder();
-        csv.append("Раздел;Статья;Период;План;Факт;Комментарий\n");
+        csv.append("Раздел;Статья;Период;План;Факт;Действие;Комментарий\n");
         for (Category category : repository.data().categories) {
             if (category.archived) continue;
             if (includePlan) appendPlans(csv, category, range, includeComments);
@@ -49,11 +50,18 @@ public class ExportBuilder {
             // баланс пишу отдельными строками для excel
             for (PeriodBalance balance : calculator.balanceSeries(Periods.weeksBetween(range.start, range.end))) {
                 if (!range.intersects(balance.range)) continue;
+                // сюда добавил все новые показатели из аналитики, чтобы выписка не врала по депозитам и займам
                 csv.append("Баланс;Итоговый баланс;")
                         .append(escape(balance.label)).append(';')
-                        .append(Money.amount(balance.projectedIncome)).append(';')
-                        .append(Money.amount(balance.projectedExpense)).append(';')
-                        .append("Остаток: ").append(Money.rub(balance.closingBalance))
+                        .append(';')
+                        .append(Money.amount(balance.closingBalance)).append(';')
+                        .append(';')
+                        .append("Доходы: ").append(Money.rub(balance.projectedIncome))
+                        .append(", Расходы: ").append(Money.rub(balance.projectedExpense))
+                        .append(", Депозиты: ").append(Money.rub(balance.projectedDepositAdd - balance.projectedDepositWithdraw))
+                        .append(", Займы: ").append(Money.rub(balance.projectedLoanReceive - balance.projectedLoanRepay))
+                        .append(", Накопления: ").append(Money.rub(balance.closingSavings))
+                        .append(", Задолженность: ").append(Money.rub(balance.closingDebt))
                         .append('\n');
             }
         }
@@ -70,18 +78,24 @@ public class ExportBuilder {
         for (Category category : repository.data().categories) {
             if (category.archived) continue;
             double plan = calculator.planForRange(category.id, range);
-            double fact = calculator.factForRange(category.id, range);
-            if (plan == 0 && fact == 0) continue;
-            html.append("<tr><td>").append(category.type.title).append("</td><td>").append(category.name).append("</td><td>")
-                    .append(Money.amount(plan)).append("</td><td>").append(Money.amount(fact)).append("</td></tr>");
+            double fact = calculator.factNetForRange(category.id, range);
+            boolean hasFact = calculator.hasFactForRange(category.id, range);
+            if (plan == 0 && !hasFact) continue;
+            html.append("<tr><td>").append(htmlEscape(category.type.title)).append("</td><td>").append(htmlEscape(category.name)).append("</td><td>")
+                    .append(plan == 0 ? "—" : Money.amount(plan)).append("</td><td>").append(exportFactText(category, fact, hasFact)).append("</td></tr>");
         }
         html.append("</table>");
-        html.append("<h3>Баланс по периодам</h3><table border=\"1\"><tr><th>Период</th><th>Доходы</th><th>Расходы</th><th>Итоговый баланс</th></tr>");
+        html.append("<h3>Баланс по периодам</h3><table border=\"1\"><tr><th>Период</th><th>Доходы</th><th>Расходы</th><th>Депозиты</th><th>Займы</th><th>Накопления</th><th>Задолженность</th><th>Итоговый баланс</th></tr>");
         for (PeriodBalance balance : calculator.balanceSeries(Periods.weeksBetween(range.start, range.end))) {
             if (!range.intersects(balance.range)) continue;
-            html.append("<tr><td>").append(balance.label).append("</td><td>")
+            // таблицу в excel расширил под новую формулу доступного баланса
+            html.append("<tr><td>").append(htmlEscape(balance.label)).append("</td><td>")
                     .append(Money.amount(balance.projectedIncome)).append("</td><td>")
                     .append(Money.amount(balance.projectedExpense)).append("</td><td>")
+                    .append(Money.amount(balance.projectedDepositAdd - balance.projectedDepositWithdraw)).append("</td><td>")
+                    .append(Money.amount(balance.projectedLoanReceive - balance.projectedLoanRepay)).append("</td><td>")
+                    .append(Money.amount(balance.closingSavings)).append("</td><td>")
+                    .append(Money.amount(balance.closingDebt)).append("</td><td>")
                     .append(Money.amount(balance.closingBalance)).append("</td></tr>");
         }
         html.append("</table></body></html>");
@@ -91,10 +105,55 @@ public class ExportBuilder {
     // pdf рисую через canvas
     public byte[] buildPdf(DateRange range) throws IOException {
         PdfDocument document = new PdfDocument();
-        // a4: 595x842, пока одна страница
-        PdfDocument.Page page = document.startPage(new PdfDocument.PageInfo.Builder(595, 842, 1).create());
-        Canvas canvas = page.getCanvas();
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        int pageNumber = 1;
+        PdfDocument.Page page = startPdfPage(document, pageNumber);
+        Canvas canvas = page.getCanvas();
+        int y = drawPdfHeader(canvas, paint, range);
+        y = drawPdfTableHeader(canvas, paint, y);
+        for (Category category : repository.data().categories) {
+            if (category.archived) continue;
+            double plan = calculator.planForRange(category.id, range);
+            double fact = calculator.factNetForRange(category.id, range);
+            boolean hasFact = calculator.hasFactForRange(category.id, range);
+            if (plan == 0 && !hasFact) continue;
+            if (y > 790) {
+                // если строки закончились по высоте, продолжаю на новом листе
+                document.finishPage(page);
+                page = startPdfPage(document, ++pageNumber);
+                canvas = page.getCanvas();
+                y = drawPdfHeader(canvas, paint, range);
+                y = drawPdfTableHeader(canvas, paint, y);
+            }
+            drawPdfCategoryRow(canvas, paint, category, plan, fact, hasFact, y);
+            y += 24;
+        }
+        if (y > 750) {
+            // сводку лучше перенести, чем лепить в самый низ страницы
+            document.finishPage(page);
+            page = startPdfPage(document, ++pageNumber);
+            canvas = page.getCanvas();
+            y = drawPdfHeader(canvas, paint, range);
+        } else {
+            y += 16;
+        }
+        drawPdfSummary(canvas, paint, range, y);
+        document.finishPage(page);
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        // эти байты андроид запишет в файл
+        document.writeTo(output);
+        document.close();
+        return output.toByteArray();
+    }
+
+    // один лист pdf, размер a4 в android-точках
+    private PdfDocument.Page startPdfPage(PdfDocument document, int pageNumber) {
+        return document.startPage(new PdfDocument.PageInfo.Builder(595, 842, pageNumber).create());
+    }
+
+    // верх страницы одинаковый на всех листах
+    private int drawPdfHeader(Canvas canvas, Paint paint, DateRange range) {
         paint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
         paint.setColor(INK);
         paint.setTextSize(24);
@@ -103,8 +162,11 @@ public class ExportBuilder {
         paint.setTextSize(12);
         paint.setColor(MUTED);
         canvas.drawText(Periods.fullDate(range.start) + " - " + Periods.fullDate(range.end), 42, 82, paint);
+        return 122;
+    }
 
-        int y = 122;
+    // заголовки таблицы pdf
+    private int drawPdfTableHeader(Canvas canvas, Paint paint, int y) {
         paint.setTextSize(13);
         paint.setColor(INK);
         paint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
@@ -116,37 +178,40 @@ public class ExportBuilder {
         paint.setStrokeWidth(1);
         paint.setColor(LINE);
         canvas.drawLine(42, y, 552, y, paint);
-        y += 24;
+        return y + 24;
+    }
 
+    // одна строка статьи в pdf
+    private void drawPdfCategoryRow(Canvas canvas, Paint paint, Category category, double plan, double fact, boolean hasFact, int y) {
         paint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL));
         paint.setTextSize(12);
-        for (Category category : repository.data().categories) {
-            if (category.archived) continue;
-            double plan = calculator.planForRange(category.id, range);
-            double fact = calculator.factForRange(category.id, range);
-            if (plan == 0 && fact == 0) continue;
-            // если строк много, пока обрезаю. потом нужна пагинация
-            if (y > 790) break;
-            paint.setColor(INK);
-            canvas.drawText(trim(category.name, 24), 42, y, paint);
-            paint.setColor(colorFor(category.type.title));
-            canvas.drawText(plan == 0 ? "—" : Money.amount(plan), 230, y, paint);
-            canvas.drawText(fact == 0 ? "—" : Money.amount(fact), 330, y, paint);
-            canvas.drawText(category.type.title, 430, y, paint);
-            y += 24;
+        paint.setColor(INK);
+        canvas.drawText(trim(category.name, 24), 42, y, paint);
+        paint.setColor(colorFor(category.type.title));
+        canvas.drawText(plan == 0 ? "—" : Money.amount(plan), 230, y, paint);
+        canvas.drawText(exportFactText(category, fact, hasFact), 330, y, paint);
+        canvas.drawText(category.type.title, 430, y, paint);
+    }
+
+    // для файлов тоже показываю движение депозитов/займов со знаком
+    private String exportFactText(Category category, double fact, boolean hasFact) {
+        if (!hasFact) return "—";
+        if (category.type == ru.textayga.mobile.model.CategoryType.DEPOSIT || category.type == ru.textayga.mobile.model.CategoryType.LOAN) {
+            return (fact >= 0 ? "+" : "-") + Money.amount(Math.abs(fact));
         }
-        y += 16;
+        return Money.amount(fact);
+    }
+
+    // сводка в конце файла
+    private void drawPdfSummary(Canvas canvas, Paint paint, DateRange range, int y) {
         paint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
         paint.setColor(BLUE);
         paint.setTextSize(15);
         canvas.drawText("Прогнозный баланс на конец периода: " + Money.rub(calculator.projectedBalanceAt(range.end)), 42, y, paint);
-        document.finishPage(page);
-
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        // эти байты андроид запишет в файл
-        document.writeTo(output);
-        document.close();
-        return output.toByteArray();
+        y += 24;
+        paint.setTextSize(12);
+        paint.setColor(INK);
+        canvas.drawText("Накопления: " + Money.rub(calculator.savingsUpTo(range.end)) + "   Задолженность: " + Money.rub(calculator.debtUpTo(range.end)), 42, y, paint);
     }
 
     // плановые строки для csv
@@ -157,6 +222,7 @@ public class ExportBuilder {
                     .append(escape(category.name)).append(';')
                     .append(escape(Periods.label(plan.periodKey))).append(';')
                     .append(Money.amount(plan.amount)).append(';')
+                    .append(';')
                     .append(';')
                     .append(includeComments ? escape(plan.comment) : "")
                     .append('\n');
@@ -173,15 +239,27 @@ public class ExportBuilder {
                     .append(escape(Periods.label(fact.periodKey))).append(';')
                     .append(';')
                     .append(Money.amount(fact.amount)).append(';')
+                    .append(escape(actionTitle(fact))).append(';')
                     .append(includeComments ? escape(fact.comment) : "")
                     .append('\n');
         }
+    }
+
+    // для обычных доходов/расходов действие пустое, а для депозитов/займов пишу понятнее
+    private String actionTitle(FactEntry fact) {
+        return fact.action == null || "NONE".equals(fact.action.name()) ? "" : fact.action.title;
     }
 
     // чищу текст, чтоб csv не ломался
     private String escape(String value) {
         if (value == null) return "";
         return value.replace(";", ",").replace("\n", " ");
+    }
+
+    // html тоже надо чистить, а то название статьи может сломать таблицу
+    private String htmlEscape(String value) {
+        if (value == null) return "";
+        return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     // длинный текст в pdf режу по колонке
@@ -194,6 +272,7 @@ public class ExportBuilder {
     private int colorFor(String title) {
         if ("Доход".equals(title)) return GREEN;
         if ("Расход".equals(title)) return RED;
+        if ("Заём".equals(title)) return PURPLE;
         return BLUE;
     }
 }

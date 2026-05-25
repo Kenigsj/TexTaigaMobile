@@ -13,6 +13,7 @@ public class Category {
     public String icon;
     public CategoryType type;
     public boolean archived;
+    public double initialAmount;
 
     // статью превращаю в json
     public JSONObject toJson() throws JSONException {
@@ -24,6 +25,7 @@ public class Category {
         json.put("icon", icon);
         json.put("type", type.name());
         json.put("archived", archived);
+        json.put("initialAmount", initialAmount);
         return json;
     }
 
@@ -35,8 +37,9 @@ public class Category {
         category.description = json.optString("description");
         category.keywords = json.optString("keywords");
         category.icon = json.optString("icon", "");
-        category.type = CategoryType.valueOf(json.optString("type", CategoryType.EXPENSE.name()));
+        category.type = CategoryType.fromStorage(json.optString("type", CategoryType.EXPENSE.name()), category.name);
         category.archived = json.optBoolean("archived");
+        category.initialAmount = json.optDouble("initialAmount", 0);
         return category;
     }
 }

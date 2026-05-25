@@ -57,6 +57,11 @@ public final class Periods {
         return "Y:" + year;
     }
 
+    // квартал храню отдельным ключом для бюджета
+    public static String quarterKey(int year, int quarter) {
+        return "Q:" + year + "-" + quarter;
+    }
+
     // по ключу восстанавливаю даты
     public static DateRange rangeForKey(String key) {
         if (key.startsWith("W:")) {
@@ -71,6 +76,15 @@ public final class Periods {
             int year = Integer.parseInt(key.substring(2));
             return new DateRange(LocalDate.of(year, 1, 1), LocalDate.of(year, 12, 31));
         }
+        if (key.startsWith("Q:")) {
+            String[] parts = key.substring(2).split("-");
+            int year = Integer.parseInt(parts[0]);
+            int quarter = Integer.parseInt(parts[1]);
+            int firstMonth = (quarter - 1) * 3 + 1;
+            YearMonth start = YearMonth.of(year, firstMonth);
+            YearMonth end = start.plusMonths(2);
+            return new DateRange(start.atDay(1), end.atEndOfMonth());
+        }
         LocalDate today = LocalDate.now();
         return new DateRange(today, today);
     }
@@ -80,6 +94,10 @@ public final class Periods {
         if (key.startsWith("W:")) return weekLabel(startOfWeek(LocalDate.parse(key.substring(2), ISO)));
         if (key.startsWith("M:")) return monthName(YearMonth.parse(key.substring(2)));
         if (key.startsWith("Y:")) return key.substring(2);
+        if (key.startsWith("Q:")) {
+            String[] parts = key.substring(2).split("-");
+            return parts[1] + " квартал " + parts[0];
+        }
         return key;
     }
 
@@ -90,6 +108,24 @@ public final class Periods {
             return shortDate(start) + "\n" + shortDate(start.plusDays(6));
         }
         return label(key);
+    }
+
+    // месяцы года для режима бюджета "Месяцы"
+    public static List<PeriodChoice> monthsForYear(int year) {
+        ArrayList<PeriodChoice> choices = new ArrayList<>();
+        for (int month = 1; month <= 12; month++) {
+            addChoice(choices, monthKey(YearMonth.of(year, month)));
+        }
+        return choices;
+    }
+
+    // кварталы года для режима бюджета "Кварталы"
+    public static List<PeriodChoice> quartersForYear(int year) {
+        ArrayList<PeriodChoice> choices = new ArrayList<>();
+        for (int quarter = 1; quarter <= 4; quarter++) {
+            addChoice(choices, quarterKey(year, quarter));
+        }
+        return choices;
     }
 
     // нормально отображение недели

@@ -22,6 +22,9 @@ import ru.textayga.mobile.model.CategoryType;
 
 // свой ui-kit, чтоб не копипастить стили
 public class UiKit {
+    // один id для главного скролла, чтобы activity могла вернуть позицию после перерисовки
+    public static final int MAIN_SCROLL_ID = 0x10203040;
+
     // цвета приложения
     public static final int BG = Color.rgb(245, 245, 247);
     public static final int CARD = Color.WHITE;
@@ -31,6 +34,7 @@ public class UiKit {
     public static final int BLUE = Color.rgb(37, 99, 235);
     public static final int GREEN = Color.rgb(18, 184, 112);
     public static final int RED = Color.rgb(255, 45, 58);
+    public static final int PURPLE = Color.rgb(124, 58, 237);
     public static final int SOFT_BLUE = Color.rgb(237, 245, 255);
 
     private final Activity activity;
@@ -47,12 +51,13 @@ public class UiKit {
         root.setBackgroundColor(BG);
 
         ScrollView scroll = new ScrollView(activity);
+        scroll.setId(MAIN_SCROLL_ID);
         LinearLayout content = new LinearLayout(activity);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(20), dp(16), dp(20), dp(20));
         scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
 
-        if (eyebrow != null) content.addView(label(eyebrow, 18, Color.rgb(205, 208, 214), Typeface.BOLD));
+        // серую подпись над заголовком убрал, а параметр оставил, чтоб не переписывать все вызовы
 
         LinearLayout titleRow = row();
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -78,6 +83,7 @@ public class UiKit {
         nav.addView(navItem("Бюджет", NavTarget.BALANCE, active, listener), new LinearLayout.LayoutParams(0, -1, 1));
         nav.addView(navItem("План", NavTarget.PLAN, active, listener), new LinearLayout.LayoutParams(0, -1, 1));
         nav.addView(navItem("Факт", NavTarget.FACT, active, listener), new LinearLayout.LayoutParams(0, -1, 1));
+        // настройки открываются шестеренкой, поэтому в нижнем меню снова выписки
         nav.addView(navItem("Выписки", NavTarget.EXPORT, active, listener), new LinearLayout.LayoutParams(0, -1, 1));
         return nav;
     }
@@ -308,6 +314,7 @@ public class UiKit {
     public int colorFor(ru.textayga.mobile.model.CategoryType type) {
         if (type == ru.textayga.mobile.model.CategoryType.INCOME) return GREEN;
         if (type == ru.textayga.mobile.model.CategoryType.EXPENSE) return RED;
+        if (type == ru.textayga.mobile.model.CategoryType.LOAN) return PURPLE;
         return BLUE;
     }
 
@@ -369,11 +376,12 @@ public class UiKit {
                     canvas.drawLine(p + dp(9), y, w - p, y, paint);
                 }
             } else if (target == NavTarget.EXPORT) {
-                RectF tray = new RectF(p + 1, h - p - dp(10), w - p - 1, h - p);
-                canvas.drawRoundRect(tray, dp(3), dp(3), paint);
-                canvas.drawLine(w / 2f, p + dp(3), w / 2f, h - p - dp(13), paint);
-                canvas.drawLine(w / 2f, p + dp(3), w / 2f - dp(6), p + dp(9), paint);
-                canvas.drawLine(w / 2f, p + dp(3), w / 2f + dp(6), p + dp(9), paint);
+                // иконка выписки: лист и стрелка наружу
+                RectF page = new RectF(p + dp(2), p + dp(4), w - p - dp(2), h - p - dp(3));
+                canvas.drawRoundRect(page, dp(3), dp(3), paint);
+                canvas.drawLine(w / 2f, h - p - dp(8), w - p, h - p - dp(8), paint);
+                canvas.drawLine(w - p, h - p - dp(8), w - p, h - p - dp(15), paint);
+                canvas.drawLine(w - p, h - p - dp(8), w - p - dp(7), h - p - dp(8), paint);
             }
         }
     }
@@ -420,13 +428,17 @@ public class UiKit {
                 canvas.drawLine(cx - dp(6), cy - dp(1), cx + dp(9), cy - dp(1), paint);
                 canvas.drawCircle(cx - dp(3), cy + dp(11), dp(1), paint);
                 canvas.drawCircle(cx + dp(7), cy + dp(11), dp(1), paint);
-            } else {
+            } else if (type == CategoryType.DEPOSIT) {
                 canvas.drawLine(cx - dp(9), cy - dp(5), cx + dp(8), cy - dp(5), paint);
                 canvas.drawLine(cx + dp(8), cy - dp(5), cx + dp(3), cy - dp(10), paint);
                 canvas.drawLine(cx + dp(8), cy - dp(5), cx + dp(3), cy, paint);
                 canvas.drawLine(cx + dp(9), cy + dp(6), cx - dp(8), cy + dp(6), paint);
                 canvas.drawLine(cx - dp(8), cy + dp(6), cx - dp(3), cy + dp(1), paint);
                 canvas.drawLine(cx - dp(8), cy + dp(6), cx - dp(3), cy + dp(11), paint);
+            } else {
+                RectF card = new RectF(cx - dp(10), cy - dp(7), cx + dp(10), cy + dp(7));
+                canvas.drawRoundRect(card, dp(3), dp(3), paint);
+                canvas.drawLine(cx - dp(6), cy, cx + dp(6), cy, paint);
             }
         }
     }

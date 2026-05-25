@@ -13,6 +13,7 @@ import ru.textayga.mobile.MainActivity;
 import ru.textayga.mobile.domain.Periods;
 import ru.textayga.mobile.model.Category;
 import ru.textayga.mobile.model.CategoryType;
+import ru.textayga.mobile.model.FactAction;
 import ru.textayga.mobile.ui.NavTarget;
 import ru.textayga.mobile.ui.UiKit;
 
@@ -34,6 +35,9 @@ public class FactScreen implements AppScreen {
             });
         }));
         form.addView(selector(host, "Статья", category == null ? "Выберите статью" : category.name, "◘", v -> host.showCategoryPicker()));
+        if (category != null && (category.type == CategoryType.DEPOSIT || category.type == CategoryType.LOAN)) {
+            form.addView(actionSelector(host, category));
+        }
 
         EditText amountInput = host.ui.editField("Сумма", host.factAmountDraft, 30, true);
         amountInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
@@ -88,6 +92,34 @@ public class FactScreen implements AppScreen {
         screen.content.addView(form);
         screen.content.addView(host.ui.infoBanner("После сохранения баланс пересчитается автоматически"));
         return screen.root;
+    }
+
+    // для депозита и займа важно выбрать знак операции
+    private View actionSelector(MainActivity host, Category category) {
+        LinearLayout block = host.ui.column();
+        android.widget.TextView label = host.ui.label(category.type == CategoryType.DEPOSIT ? "Действие для депозита" : "Действие для займа", 13, UiKit.MUTED, Typeface.NORMAL);
+        label.setPadding(0, 0, 0, host.ui.dp(6));
+        block.addView(label);
+        LinearLayout row = host.ui.row();
+        if (category.type == CategoryType.DEPOSIT) {
+            row.addView(actionChip(host, FactAction.DEPOSIT_ADD), new LinearLayout.LayoutParams(0, host.ui.dp(52), 1));
+            host.ui.gap(row, 10, false);
+            row.addView(actionChip(host, FactAction.DEPOSIT_WITHDRAW), new LinearLayout.LayoutParams(0, host.ui.dp(52), 1));
+        } else {
+            row.addView(actionChip(host, FactAction.LOAN_RECEIVE), new LinearLayout.LayoutParams(0, host.ui.dp(52), 1));
+            host.ui.gap(row, 10, false);
+            row.addView(actionChip(host, FactAction.LOAN_REPAY), new LinearLayout.LayoutParams(0, host.ui.dp(52), 1));
+        }
+        block.addView(row);
+        return block;
+    }
+
+    // обычный чип, только пишет выбранное действие в activity
+    private android.widget.TextView actionChip(MainActivity host, FactAction action) {
+        return host.ui.chip(action.title, host.factAction == action, v -> {
+            host.factAction = action;
+            host.showFact();
+        });
     }
 
     // одинаковая строка выбора для периода и статьи

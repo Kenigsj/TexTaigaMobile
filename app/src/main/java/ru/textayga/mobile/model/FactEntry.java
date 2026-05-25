@@ -15,6 +15,7 @@ public class FactEntry {
     public String date;
     public double amount;
     public String payment;
+    public FactAction action = FactAction.NONE;
     public String comment;
 
     // перевожу факт в json для сохранения
@@ -27,6 +28,7 @@ public class FactEntry {
         json.put("date", date);
         json.put("amount", amount);
         json.put("payment", payment);
+        json.put("action", action.name());
         json.put("comment", comment);
         return json;
     }
@@ -36,11 +38,12 @@ public class FactEntry {
         FactEntry fact = new FactEntry();
         fact.id = json.optString("id");
         fact.categoryId = json.optString("categoryId");
-        fact.categoryType = CategoryType.valueOf(json.optString("categoryType", CategoryType.EXPENSE.name()));
+        fact.categoryType = CategoryType.fromStorage(json.optString("categoryType", CategoryType.EXPENSE.name()), "");
         fact.periodKey = json.optString("periodKey");
         fact.date = json.optString("date", LocalDate.now().toString());
         fact.amount = json.optDouble("amount");
         fact.payment = json.optString("payment", "Карта");
+        fact.action = FactAction.fromStorage(json.optString("action", ""), fact.categoryType);
         fact.comment = json.optString("comment");
         return fact;
     }

@@ -17,6 +17,7 @@ import ru.textayga.mobile.ui.UiKit;
 public class ExportScreen implements AppScreen {
     @Override
     public View render(MainActivity host) {
+        // выписки снова отдельная нижняя вкладка
         UiKit.Screen screen = host.ui.screen("выписка", "Экспорт выписки", "", host.ui.iconButton("‹", v -> host.showBalance()), NavTarget.EXPORT, host);
         screen.content.addView(host.ui.infoBanner("Сформируйте файл с данными бюджета, плана и факта за выбранный период."));
         screen.content.addView(periodCard(host));
@@ -69,7 +70,7 @@ public class ExportScreen implements AppScreen {
     private View includeCard(MainActivity host) {
         LinearLayout card = host.ui.card();
         card.addView(host.ui.label("2. Что включить в экспорт", 18, UiKit.INK, Typeface.BOLD));
-        card.addView(checkRow(host, "Плановые значения", "План доходов, расходов и перемещений", host.includePlan, () -> host.includePlan = !host.includePlan));
+        card.addView(checkRow(host, "Плановые значения", "План доходов, расходов, депозитов и займов", host.includePlan, () -> host.includePlan = !host.includePlan));
         card.addView(checkRow(host, "Фактические операции", "Все внесенные факты", host.includeFact, () -> host.includeFact = !host.includeFact));
         card.addView(checkRow(host, "Расчетный баланс", "Итоги по выбранному периоду", host.includeBalance, () -> host.includeBalance = !host.includeBalance));
         card.addView(checkRow(host, "Комментарии", "Комментарии к операциям и статьям", host.includeComments, () -> host.includeComments = !host.includeComments));

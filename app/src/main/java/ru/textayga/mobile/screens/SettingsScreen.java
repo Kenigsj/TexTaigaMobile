@@ -2,6 +2,7 @@ package ru.textayga.mobile.screens;
 
 import android.app.Dialog;
 import android.graphics.Typeface;
+import android.text.InputType;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
@@ -24,45 +25,23 @@ import ru.textayga.mobile.model.PeriodKind;
 import ru.textayga.mobile.ui.NavTarget;
 import ru.textayga.mobile.ui.UiKit;
 
-// настройки, тут статьи, периоды, кошельки, прочее
 public class SettingsScreen implements AppScreen {
     @Override
     public View render(MainActivity host) {
         UiKit.Screen screen = host.ui.screen("Настройки", "Настройки", "Управляйте статьями, периодами и параметрами приложения", null, NavTarget.SETTINGS, host);
-        LinearLayout tabs = host.ui.row();
-        tabs.setPadding(0, host.ui.dp(14), 0, host.ui.dp(16));
-        addTab(host, tabs, "categories", "Статьи");
-        addTab(host, tabs, "periods", "Периоды");
-        addTab(host, tabs, "wallets", "Кошельки");
-        addTab(host, tabs, "visual", "Визуальные");
-        addTab(host, tabs, "other", "Прочее");
-        HorizontalScrollView tabsScroll = new HorizontalScrollView(host);
-        // вкладки скроллятся, иначе на телефоне все ломается
-        tabsScroll.setHorizontalScrollBarEnabled(false);
-        tabsScroll.addView(tabs, new HorizontalScrollView.LayoutParams(-2, -2));
-        screen.content.addView(tabsScroll);
-
-        if ("categories".equals(host.settingsTab)) showCategories(host, screen.content);
-        if ("periods".equals(host.settingsTab)) showPeriods(host, screen.content);
-        if ("wallets".equals(host.settingsTab)) showWallets(host, screen.content);
-        if ("visual".equals(host.settingsTab)) showVisual(host, screen.content);
-        if ("other".equals(host.settingsTab)) showOther(host, screen.content);
+        // верхние вкладки настроек убрал, по макету тут сразу список статей
+        showCategories(host, screen.content);
         return screen.root;
     }
 
     // раздел статей (фильтр, добавить, редактировать, архив)
     private void showCategories(MainActivity host, LinearLayout content) {
-        LinearLayout card = host.ui.card();
-        LinearLayout head = host.ui.row();
-        LinearLayout textBox = host.ui.column();
-        textBox.addView(host.ui.label("Категории и статьи", 20, UiKit.INK, Typeface.BOLD));
-        textBox.addView(host.ui.label("Настройте список статей доходов, расходов и перемещений", 13, UiKit.MUTED, Typeface.NORMAL));
-        head.addView(textBox, new LinearLayout.LayoutParams(0, -2, 1));
-        head.addView(host.ui.primaryButton("+ Добавить", v -> showCategoryDialog(host, null)), new LinearLayout.LayoutParams(host.ui.dp(140), host.ui.dp(52)));
-        card.addView(head);
+        LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(-1, host.ui.dp(52));
+        addLp.setMargins(0, host.ui.dp(14), 0, 0);
+        content.addView(host.ui.primaryButton("+ Добавить статью", v -> showCategoryDialog(host, null)), addLp);
 
         HorizontalScrollView filterScroll = new HorizontalScrollView(host);
-        // фильтры скроллятся из-за длинного "перемещения"
+        // фильтры отдельно от карточки, как на экране дизайнера
         filterScroll.setHorizontalScrollBarEnabled(false);
         LinearLayout filters = host.ui.row();
         filters.setPadding(0, host.ui.dp(14), 0, host.ui.dp(12));
@@ -72,15 +51,19 @@ public class SettingsScreen implements AppScreen {
         host.ui.gap(filters, 8, false);
         filters.addView(filter(host, "Расходы", host.categoryFilter == CategoryType.EXPENSE, () -> host.categoryFilter = CategoryType.EXPENSE), new LinearLayout.LayoutParams(host.ui.dp(112), host.ui.dp(44)));
         host.ui.gap(filters, 8, false);
-        filters.addView(filter(host, "Перемещения", host.categoryFilter == CategoryType.TRANSFER, () -> host.categoryFilter = CategoryType.TRANSFER), new LinearLayout.LayoutParams(host.ui.dp(142), host.ui.dp(44)));
+        filters.addView(filter(host, "Депозиты", host.categoryFilter == CategoryType.DEPOSIT, () -> host.categoryFilter = CategoryType.DEPOSIT), new LinearLayout.LayoutParams(host.ui.dp(112), host.ui.dp(44)));
+        host.ui.gap(filters, 8, false);
+        filters.addView(filter(host, "Займы", host.categoryFilter == CategoryType.LOAN, () -> host.categoryFilter = CategoryType.LOAN), new LinearLayout.LayoutParams(host.ui.dp(96), host.ui.dp(44)));
         filterScroll.addView(filters, new HorizontalScrollView.LayoutParams(-2, -2));
-        card.addView(filterScroll);
+        content.addView(filterScroll);
 
+        LinearLayout card = host.ui.card();
         addCategorySection(host, card, "ДОХОДЫ", CategoryType.INCOME);
         addCategorySection(host, card, "РАСХОДЫ", CategoryType.EXPENSE);
-        addCategorySection(host, card, "ПЕРЕМЕЩЕНИЯ", CategoryType.TRANSFER);
+        addCategorySection(host, card, "ДЕПОЗИТЫ", CategoryType.DEPOSIT);
+        addCategorySection(host, card, "ЗАЙМЫ", CategoryType.LOAN);
         content.addView(card);
-        content.addView(settingsLink(host, "Статья по умолчанию для разницы", "Используется при сверке баланса", v -> chooseDefaultDifference(host)));
+        content.addView(settingsLink(host, "Статья по умолчанию для разницы", defaultDifferenceName(host), v -> chooseDefaultDifference(host)));
         content.addView(settingsLink(host, "Архивированные статьи", "Просмотр и восстановление удаленных статей", v -> showArchived(host)));
     }
 
@@ -97,23 +80,6 @@ public class SettingsScreen implements AppScreen {
         card.addView(row);
         card.addView(infoRow(host, "Текущий период", host.repository.data().periodKind == PeriodKind.WEEK ? Periods.weekLabel(Periods.startOfWeek(LocalDate.now())) : Periods.monthName(YearMonth.now())));
         card.addView(infoRow(host, "Горизонт планирования", host.repository.data().periodKind == PeriodKind.WEEK ? "52 недели" : "12 месяцев"));
-        content.addView(card);
-    }
-
-    // кошельки и стартовый баланс
-    private void showWallets(MainActivity host, LinearLayout content) {
-        LinearLayout card = host.ui.card();
-        card.addView(host.ui.label("Кошельки", 20, UiKit.INK, Typeface.BOLD));
-        card.addView(host.ui.label("Источники денег для учета фактических операций", 13, UiKit.MUTED, Typeface.NORMAL));
-        card.addView(settingsLink(host, "Стартовый баланс", Money.rub(host.repository.data().startingBalance), v -> showStartingBalanceDialog(host)));
-        LinearLayout head = host.ui.row();
-        head.setPadding(0, host.ui.dp(14), 0, 0);
-        head.addView(host.ui.label("Типы оплаты", 17, UiKit.INK, Typeface.BOLD), new LinearLayout.LayoutParams(0, -2, 1));
-        head.addView(host.ui.primaryButton("+ Добавить", v -> showPaymentDialog(host)), new LinearLayout.LayoutParams(host.ui.dp(128), host.ui.dp(48)));
-        card.addView(head);
-        for (String payment : host.repository.data().paymentTypes) {
-            card.addView(walletRow(host, payment));
-        }
         content.addView(card);
     }
 
@@ -134,6 +100,10 @@ public class SettingsScreen implements AppScreen {
         LinearLayout card = host.ui.card();
         card.addView(host.ui.label("Прочее", 20, UiKit.INK, Typeface.BOLD));
         card.addView(host.ui.label("Служебные параметры и данные приложения", 13, UiKit.MUTED, Typeface.NORMAL));
+        // выписки оставляю тут, потому что нижнее меню теперь из 4 основных вкладок
+        card.addView(settingsLink(host, "Экспорт выписки", "Сформировать файл для анализа", v -> host.showExport()));
+        // стартовый баланс нужен, чтобы первый расчет не начинался с пустого места
+        card.addView(settingsLink(host, "Стартовый баланс", Money.rub(host.repository.data().startingBalance), v -> editStartingBalance(host)));
         card.addView(infoRow(host, "Локальное хранение", "Данные сохраняются на устройстве"));
         card.addView(infoRow(host, "Версия прототипа", "Android 1.0"));
         content.addView(card);
@@ -175,7 +145,7 @@ public class SettingsScreen implements AppScreen {
         description.setEllipsize(TextUtils.TruncateAt.END);
         textBox.addView(description);
         TextView typeTag = host.ui.tag(category.type.title, host.ui.colorFor(category.type));
-        LinearLayout.LayoutParams tagLp = new LinearLayout.LayoutParams(category.type == CategoryType.TRANSFER ? host.ui.dp(110) : host.ui.dp(76), host.ui.dp(26));
+        LinearLayout.LayoutParams tagLp = new LinearLayout.LayoutParams(category.type == CategoryType.DEPOSIT || category.type == CategoryType.LOAN ? host.ui.dp(92) : host.ui.dp(76), host.ui.dp(26));
         tagLp.setMargins(0, host.ui.dp(5), 0, 0);
         textBox.addView(typeTag, tagLp);
         row.addView(textBox, new LinearLayout.LayoutParams(0, -2, 1));
@@ -197,10 +167,11 @@ public class SettingsScreen implements AppScreen {
         // draft нужен, чтоб не менять статью до кнопки сохранить
         draft.type = source == null ? CategoryType.INCOME : source.type;
         TextView type = host.ui.fieldButton(draft.type.plural, "");
-        type.setOnClickListener(v -> host.showChoiceDialog("Тип статьи", new String[]{"Доходы", "Расходы", "Перемещения"}, label -> {
+        type.setOnClickListener(v -> host.showChoiceDialog("Тип статьи", new String[]{"Доходы", "Расходы", "Депозиты", "Займы"}, label -> {
             if ("Доходы".equals(label)) draft.type = CategoryType.INCOME;
             if ("Расходы".equals(label)) draft.type = CategoryType.EXPENSE;
-            if ("Перемещения".equals(label)) draft.type = CategoryType.TRANSFER;
+            if ("Депозиты".equals(label)) draft.type = CategoryType.DEPOSIT;
+            if ("Займы".equals(label)) draft.type = CategoryType.LOAN;
             type.setText(draft.type.plural + "  ˅");
         }));
         box.addView(host.ui.formLabel("Тип"));
@@ -209,14 +180,11 @@ public class SettingsScreen implements AppScreen {
         box.addView(host.ui.formLabel("Название"));
         box.addView(name, new LinearLayout.LayoutParams(-1, host.ui.dp(64)));
         EditText desc = host.ui.editField("", source == null ? "" : source.description, 18, false);
-        box.addView(host.ui.formLabel("Описание"));
+        box.addView(host.ui.formLabel("Комментарий"));
         box.addView(desc, new LinearLayout.LayoutParams(-1, host.ui.dp(64)));
-        EditText icon = host.ui.editField("", source == null ? "" : source.icon, 18, false);
-        box.addView(host.ui.formLabel("Метка / эмодзи"));
-        box.addView(icon, new LinearLayout.LayoutParams(-1, host.ui.dp(64)));
-        EditText keywords = host.ui.editField("", source == null ? "" : source.keywords, 18, false);
-        box.addView(host.ui.formLabel("Ключевые слова для импорта"));
-        box.addView(keywords, new LinearLayout.LayoutParams(-1, host.ui.dp(64)));
+        EditText initial = host.ui.editField("", source == null || source.initialAmount == 0 ? "" : Money.amount(source.initialAmount), 18, false);
+        box.addView(host.ui.formLabel("Начальная сумма долга (для займа)"));
+        box.addView(initial, new LinearLayout.LayoutParams(-1, host.ui.dp(64)));
         LinearLayout.LayoutParams saveLp = new LinearLayout.LayoutParams(-1, host.ui.dp(62));
         saveLp.setMargins(0, host.ui.dp(24), 0, 0);
         box.addView(host.ui.primaryButton("Сохранить", v -> {
@@ -230,8 +198,11 @@ public class SettingsScreen implements AppScreen {
             category.type = draft.type;
             category.name = categoryName;
             category.description = desc.getText().toString().trim();
-            category.icon = icon.getText().toString().trim();
-            category.keywords = keywords.getText().toString().trim();
+            // иконку и ключевые слова больше не показываю в форме, но старые данные не затираю
+            if (source == null) category.icon = "";
+            if (source == null) category.keywords = categoryName.toLowerCase();
+            // начальную сумму учитываю только у займа, у остальных она не нужна
+            category.initialAmount = category.type == CategoryType.LOAN ? Money.parse(initial.getText().toString()) : 0;
             category.archived = false;
             if (source == null) host.repository.data().categories.add(category);
             host.repository.save();
@@ -290,29 +261,6 @@ public class SettingsScreen implements AppScreen {
         return row;
     }
 
-    // строка типа оплаты
-    private View walletRow(MainActivity host, String payment) {
-        LinearLayout row = host.ui.row();
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(host.ui.dp(12), host.ui.dp(12), host.ui.dp(8), host.ui.dp(12));
-        row.setBackground(host.ui.bg(android.graphics.Color.WHITE, 8, UiKit.LINE, 1));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-        lp.setMargins(0, host.ui.dp(10), 0, 0);
-        row.setLayoutParams(lp);
-        row.addView(host.ui.circleIcon("▭", UiKit.BLUE), new LinearLayout.LayoutParams(host.ui.dp(42), host.ui.dp(42)));
-        host.ui.gap(row, 12, false);
-        row.addView(host.ui.label(payment, 16, UiKit.INK, Typeface.BOLD), new LinearLayout.LayoutParams(0, -2, 1));
-        if (!"Карта".equals(payment) && !"Наличные".equals(payment)) {
-            row.addView(host.ui.actionIconButton("delete", UiKit.RED, v -> {
-                host.repository.data().paymentTypes.remove(payment);
-                if (payment.equals(host.factPayment)) host.factPayment = host.repository.data().paymentTypes.isEmpty() ? "Карта" : host.repository.data().paymentTypes.get(0);
-                host.repository.save();
-                host.showSettings();
-            }), new LinearLayout.LayoutParams(host.ui.dp(42), host.ui.dp(42)));
-        }
-        return row;
-    }
-
     // строка-ссылка с стрелкой справа
     private View settingsLink(MainActivity host, String title, String subtitle, View.OnClickListener listener) {
         LinearLayout row = (LinearLayout) infoRow(host, title, subtitle);
@@ -324,34 +272,26 @@ public class SettingsScreen implements AppScreen {
     // выбор статьи для разницы
     private void chooseDefaultDifference(MainActivity host) {
         ArrayList<String> names = new ArrayList<>();
-        for (Category category : host.repository.data().categories) if (!category.archived) names.add(category.name);
-        host.showChoiceDialog("Статья для разницы", names.toArray(new String[0]), label -> host.toast("Выбрано: " + label));
+        for (Category category : host.repository.data().categories) {
+            if (!category.archived && (category.type == CategoryType.INCOME || category.type == CategoryType.EXPENSE)) names.add(category.name);
+        }
+        host.showChoiceDialog("Статья для разницы", names.toArray(new String[0]), label -> {
+            for (Category category : host.repository.data().categories) {
+                if (!category.archived && category.name.equals(label)) {
+                    // запоминаю id, а не название, чтобы переименование потом не сломало сверку
+                    host.repository.data().defaultDifferenceCategoryId = category.id;
+                }
+            }
+            host.repository.save();
+            host.showSettings();
+        });
     }
 
-    // диалог нового типа оплаты
-    private void showPaymentDialog(MainActivity host) {
-        Dialog dialog = host.dialogs.dialog();
-        LinearLayout box = host.dialogs.dialogBox();
-        box.addView(host.dialogs.title("Добавить тип оплаты", dialog));
-        EditText name = host.ui.editField("Название", "", 18, false);
-        box.addView(host.ui.formLabel("Название"));
-        box.addView(name, new LinearLayout.LayoutParams(-1, host.ui.dp(64)));
-        LinearLayout.LayoutParams saveLp = new LinearLayout.LayoutParams(-1, host.ui.dp(60));
-        saveLp.setMargins(0, host.ui.dp(16), 0, 0);
-        box.addView(host.ui.primaryButton("Сохранить", v -> {
-            String payment = name.getText().toString().trim();
-            if (payment.isEmpty()) {
-                host.toast("Введите название типа оплаты");
-                return;
-            }
-            if (!host.repository.data().paymentTypes.contains(payment)) host.repository.data().paymentTypes.add(payment);
-            host.repository.save();
-            dialog.dismiss();
-            host.showSettings();
-        }), saveLp);
-        dialog.setContentView(host.dialogs.wrap(box));
-        host.dialogs.show(dialog);
-        host.showKeyboard(name);
+    // подпись выбранной статьи для сверки, если ее еще нет - показываю стандартную
+    private String defaultDifferenceName(MainActivity host) {
+        Category category = host.repository.findCategory(host.repository.data().defaultDifferenceCategoryId);
+        if (category == null || category.archived) return "Неучтенные операции";
+        return category.name;
     }
 
     // выбор цвета для минуса
@@ -363,6 +303,29 @@ public class SettingsScreen implements AppScreen {
             host.repository.save();
             host.showSettings();
         });
+    }
+
+    // стартовый остаток меняется отдельно, чтобы не путать его с фактическими операциями
+    private void editStartingBalance(MainActivity host) {
+        Dialog dialog = host.dialogs.dialog();
+        LinearLayout box = host.dialogs.dialogBox();
+        box.addView(host.dialogs.title("Стартовый баланс", dialog));
+        EditText amount = host.ui.editField("Сумма", Money.amount(host.repository.data().startingBalance), 20, true);
+        amount.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
+        LinearLayout.LayoutParams amountLp = new LinearLayout.LayoutParams(-1, host.ui.dp(68));
+        amountLp.setMargins(0, host.ui.dp(14), 0, 0);
+        box.addView(amount, amountLp);
+        LinearLayout.LayoutParams saveLp = new LinearLayout.LayoutParams(-1, host.ui.dp(60));
+        saveLp.setMargins(0, host.ui.dp(16), 0, 0);
+        box.addView(host.ui.primaryButton("Сохранить", v -> {
+            host.repository.data().startingBalance = Money.parse(amount.getText().toString());
+            host.repository.save();
+            dialog.dismiss();
+            host.showSettings();
+        }), saveLp);
+        dialog.setContentView(host.dialogs.wrap(box));
+        host.dialogs.show(dialog);
+        host.showKeyboard(amount);
     }
 
     // ключ цвета перевожу в нормальное название
@@ -387,29 +350,6 @@ public class SettingsScreen implements AppScreen {
             host.repository.save();
             host.showSettings();
         });
-    }
-
-    // диалог начального баланса
-    private void showStartingBalanceDialog(MainActivity host) {
-        Dialog dialog = host.dialogs.dialog();
-        LinearLayout box = host.dialogs.dialogBox();
-        box.addView(host.dialogs.title("Стартовый баланс", dialog));
-        box.addView(host.ui.label("Введите сумму, с которой начинается расчет бюджета.", 14, UiKit.MUTED, Typeface.NORMAL));
-        EditText amount = host.ui.editField("Сумма", Money.amount(host.repository.data().startingBalance), 22, true);
-        LinearLayout.LayoutParams amountLp = new LinearLayout.LayoutParams(-1, host.ui.dp(66));
-        amountLp.setMargins(0, host.ui.dp(16), 0, 0);
-        box.addView(amount, amountLp);
-        LinearLayout.LayoutParams saveLp = new LinearLayout.LayoutParams(-1, host.ui.dp(60));
-        saveLp.setMargins(0, host.ui.dp(14), 0, 0);
-        box.addView(host.ui.primaryButton("Сохранить", v -> {
-            host.repository.data().startingBalance = Money.parse(amount.getText().toString());
-            host.repository.save();
-            dialog.dismiss();
-            host.showSettings();
-        }), saveLp);
-        dialog.setContentView(host.dialogs.wrap(box));
-        host.dialogs.show(dialog);
-        host.showKeyboard(amount);
     }
 
     // временный объект для формы статьи

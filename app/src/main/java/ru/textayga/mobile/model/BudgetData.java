@@ -18,4 +18,6 @@ public class BudgetData {
     public double startingBalance = 0;
     // цвет минуса храню строкой, так проще сохранять
     public String negativeBalanceColor = "red";
+    // выбранная статья для быстрой сверки, если пользователь ее задал
+    public String defaultDifferenceCategoryId = "";
 }

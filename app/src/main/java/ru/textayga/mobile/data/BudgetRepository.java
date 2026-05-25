@@ -45,6 +45,7 @@ public class BudgetRepository {
         data.facts.clear();
         data.paymentTypes.clear();
         data.startingBalance = 0;
+        data.defaultDifferenceCategoryId = "";
         String raw = preferences.getString(KEY_DATA, null);
         if (raw != null) {
             try {
@@ -53,6 +54,7 @@ public class BudgetRepository {
                 data.periodKind = PeriodKind.valueOf(root.optString("periodKind", PeriodKind.WEEK.name()));
                 data.startingBalance = root.optDouble("startingBalance", 0);
                 data.negativeBalanceColor = root.optString("negativeBalanceColor", "red");
+                data.defaultDifferenceCategoryId = root.optString("defaultDifferenceCategoryId", "");
                 JSONArray categories = root.optJSONArray("categories");
                 if (categories != null) {
                     for (int i = 0; i < categories.length(); i++) {
@@ -89,6 +91,7 @@ public class BudgetRepository {
                 data.periodKind = PeriodKind.WEEK;
                 data.startingBalance = 0;
                 data.negativeBalanceColor = "red";
+                data.defaultDifferenceCategoryId = "";
             }
         }
         ensurePaymentTypes();
@@ -106,6 +109,8 @@ public class BudgetRepository {
             root.put("periodKind", data.periodKind.name());
             root.put("startingBalance", data.startingBalance);
             root.put("negativeBalanceColor", data.negativeBalanceColor);
+            // id статьи для сверки сохраняю отдельно от списка статей
+            root.put("defaultDifferenceCategoryId", data.defaultDifferenceCategoryId);
             JSONArray categories = new JSONArray();
             // каждую статью кладу в json-массив
             for (Category category : data.categories) categories.put(category.toJson());
@@ -168,8 +173,8 @@ public class BudgetRepository {
         addSeed("Мобильная связь", "Телефон", "мобильная связь, телефон", "☎", CategoryType.EXPENSE);
         addSeed("Развлечения", "Досуг", "кино, игры, подписка", "★", CategoryType.EXPENSE);
         addSeed("Неучтенные операции", "Корректировка сверки", "корректировка", "!", CategoryType.EXPENSE);
-        addSeed("Депозит", "Пополнение депозита", "депозит", "⇄", CategoryType.TRANSFER);
-        addSeed("Кредитная карта", "Погашение кредитной карты", "кредит", "▭", CategoryType.TRANSFER);
+        addSeed("Подушка безопасности", "Накопления", "депозит, накопления, подушка", "□", CategoryType.DEPOSIT);
+        addSeed("Кредит", "Задолженность", "кредит, займ, долг", "▭", CategoryType.LOAN);
     }
 
     // метод, чтоб не собирать category каждый раз руками
@@ -181,13 +186,16 @@ public class BudgetRepository {
         category.keywords = keywords;
         category.icon = icon;
         category.type = type;
+        // начальную сумму можно потом поставить при создании займа
+        category.initialAmount = 0;
         data.categories.add(category);
     }
 
     // карту и наличные восстанавливаю всегда
     private void ensurePaymentTypes() {
+        // депозит теперь статья, а не тип оплаты
+        data.paymentTypes.remove("Депозит");
         if (!data.paymentTypes.contains("Карта")) data.paymentTypes.add("Карта");
         if (!data.paymentTypes.contains("Наличные")) data.paymentTypes.add("Наличные");
-        if (!data.paymentTypes.contains("Депозит")) data.paymentTypes.add("Депозит");
     }
 }

@@ -10,12 +10,26 @@ public class PeriodBalance {
     public double planExpense;
     public double factIncome;
     public double factExpense;
+    public double planDeposit;
+    public double planLoan;
+    public double factDepositAdd;
+    public double factDepositWithdraw;
+    public double factLoanReceive;
+    public double factLoanRepay;
     public double projectedIncome;
     public double projectedExpense;
+    public double projectedDepositAdd;
+    public double projectedDepositWithdraw;
+    public double projectedLoanReceive;
+    public double projectedLoanRepay;
+    public double openingSavings;
+    public double closingSavings;
+    public double openingDebt;
+    public double closingDebt;
     public double closingBalance;
 
     // изменение за период: эффективные доходы минус эффективные расходы
     public double projectedDelta() {
-        return projectedIncome - projectedExpense;
+        return projectedIncome - projectedExpense - projectedDepositAdd + projectedDepositWithdraw + projectedLoanReceive - projectedLoanRepay;
     }
 }
