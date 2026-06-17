@@ -30,7 +30,14 @@ public class FactScreen implements AppScreen {
         form.addView(selector(host, "Период", Periods.label(host.factPeriodKey), "▣", v -> {
             // период берем из списка недель/месяцев
             host.showPeriodPicker("Выберите период", Periods.factChoices(host.repository.data().periodKind), host.factPeriodKey, choice -> {
-                host.factPeriodKey = choice.key;
+                host.setFactPeriod(choice.key);
+                host.showFact();
+            });
+        }));
+        form.addView(selector(host, "Дата", Periods.fullDate(host.factDate), "▣", v -> {
+            // дату выбираю отдельно, если факт надо записать конкретным днем внутри недели
+            host.showDatePicker("Дата операции", host.factDate, date -> {
+                host.setFactDate(date);
                 host.showFact();
             });
         }));

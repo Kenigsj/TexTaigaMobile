@@ -8,6 +8,8 @@ public class PlanEntry {
     // не храню id, т.к. уникальность задается парой categoryid + periodkey
     public String categoryId;
     public String periodKey;
+    // тут храню действие для депозита/займа, чтобы получение и погашение не дрались за одну ячейку
+    public String action = "";
     public double amount;
     public String comment;
 
@@ -16,6 +18,7 @@ public class PlanEntry {
         JSONObject json = new JSONObject();
         json.put("categoryId", categoryId);
         json.put("periodKey", periodKey);
+        json.put("action", action == null ? "" : action);
         json.put("amount", amount);
         json.put("comment", comment);
         return json;
@@ -26,6 +29,7 @@ public class PlanEntry {
         PlanEntry plan = new PlanEntry();
         plan.categoryId = json.optString("categoryId");
         plan.periodKey = json.optString("periodKey");
+        plan.action = json.optString("action", "");
         plan.amount = json.optDouble("amount");
         plan.comment = json.optString("comment");
         return plan;

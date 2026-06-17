@@ -4,6 +4,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.EditText;
@@ -184,11 +185,12 @@ public class BalanceScreen implements AppScreen {
 
     // таблицу собираю из двух частей, слева закрепленная "Статья", справа прокрутка по периодам
     private View balanceTable(MainActivity host, List<PeriodChoice> periods) {
-        int firstColumnWidth = 150;
-        int periodWidth = 96;
-        int headerHeight = 68;
-        int sectionHeight = 48;
-        int rowHeight = 52;
+        // чуть ужал таблицу, чтобы на телефоне помещалось больше строк сразу
+        int firstColumnWidth = 142;
+        int periodWidth = 90;
+        int headerHeight = 58;
+        int sectionHeight = 38;
+        int rowHeight = 46;
 
         LinearLayout tableFrame = new LinearLayout(host);
         tableFrame.setOrientation(LinearLayout.HORIZONTAL);
@@ -212,10 +214,11 @@ public class BalanceScreen implements AppScreen {
         scrollTable.addView(scrollHeader);
 
         addSection(host, fixedTable, scrollTable, "ДОХОДЫ", CategoryType.INCOME, periods, firstColumnWidth, periodWidth, sectionHeight, rowHeight);
+        // баланс ставлю сразу после доходов, так удобнее читать таблицу сверху вниз
+        addTotalRow(host, fixedTable, scrollTable, periods, balances, firstColumnWidth, periodWidth, rowHeight);
         addSection(host, fixedTable, scrollTable, "РАСХОДЫ", CategoryType.EXPENSE, periods, firstColumnWidth, periodWidth, sectionHeight, rowHeight);
         addSection(host, fixedTable, scrollTable, "ДЕПОЗИТЫ", CategoryType.DEPOSIT, periods, firstColumnWidth, periodWidth, sectionHeight, rowHeight);
         addSection(host, fixedTable, scrollTable, "ЗАЙМЫ", CategoryType.LOAN, periods, firstColumnWidth, periodWidth, sectionHeight, rowHeight);
-        addTotalRow(host, fixedTable, scrollTable, periods, balances, firstColumnWidth, periodWidth, rowHeight);
 
         HorizontalScrollView horizontal = new HorizontalScrollView(host);
         horizontal.setFillViewport(true);
@@ -258,12 +261,12 @@ public class BalanceScreen implements AppScreen {
 
         // спецоперации показываю в доходах/расходах, но баланс их уже считает отдельно
         if (type == CategoryType.INCOME) {
-            addSyntheticActionRow(host, fixedTable, scrollTable, "Доход от займа", CategoryType.LOAN, FactAction.LOAN_RECEIVE, periods, firstColumnWidth, periodWidth, rowHeight, UiKit.GREEN);
+            addSyntheticActionRow(host, fixedTable, scrollTable, "Взятие займа", CategoryType.LOAN, FactAction.LOAN_RECEIVE, periods, firstColumnWidth, periodWidth, rowHeight, UiKit.GREEN);
             addSyntheticActionRow(host, fixedTable, scrollTable, "Снятие с депозита", CategoryType.DEPOSIT, FactAction.DEPOSIT_WITHDRAW, periods, firstColumnWidth, periodWidth, rowHeight, UiKit.GREEN);
         }
         if (type == CategoryType.EXPENSE) {
             addSyntheticActionRow(host, fixedTable, scrollTable, "Пополнение депозита", CategoryType.DEPOSIT, FactAction.DEPOSIT_ADD, periods, firstColumnWidth, periodWidth, rowHeight, UiKit.RED);
-            addSyntheticActionRow(host, fixedTable, scrollTable, "Погашение займа", CategoryType.LOAN, FactAction.LOAN_REPAY, periods, firstColumnWidth, periodWidth, rowHeight, UiKit.RED);
+            addSyntheticActionRow(host, fixedTable, scrollTable, "Погашение кредита", CategoryType.LOAN, FactAction.LOAN_REPAY, periods, firstColumnWidth, periodWidth, rowHeight, UiKit.RED);
         }
     }
 
@@ -306,9 +309,10 @@ public class BalanceScreen implements AppScreen {
 
     // план для депозита это пополнение, а для займа это погашение
     private double syntheticPlanPart(MainActivity host, Category category, FactAction action, DateRange range) {
-        if (action != FactAction.DEPOSIT_ADD && action != FactAction.LOAN_REPAY) return 0;
-        boolean hasAnyFact = host.calculator.factForRange(category.id, range) > 0;
-        return hasAnyFact ? 0 : host.calculator.planForRange(category.id, range);
+        if (action != FactAction.DEPOSIT_ADD && action != FactAction.LOAN_RECEIVE && action != FactAction.LOAN_REPAY) return 0;
+        // план заменяю только фактом такого же действия, чтобы взятие займа не гасило план погашения
+        boolean hasSameFact = host.calculator.factActionForRange(category.id, action, range) > 0;
+        return hasSameFact ? 0 : host.calculator.planForRange(category.id, range, action);
     }
 
     // отдельно достаю только факт, чтобы серый план не красить как реальную операцию
@@ -352,7 +356,10 @@ public class BalanceScreen implements AppScreen {
             double state = host.calculator.projectedCategoryStateUpTo(category.id, range.end);
             double before = host.calculator.projectedCategoryStateUpTo(category.id, range.start.minusDays(1));
             if (state > 0) {
-                return cell(host, Money.amount(state), host.ui.colorFor(category.type), Typeface.BOLD, false, periodWidth, rowHeight, v -> showPeriodDetail(host, period.key, category.id));
+                // если состояние появилось только из плана, крашу серым, факт уже будет цветной
+                double realState = host.calculator.categoryStateUpTo(category.id, range.end);
+                int stateColor = realState > 0 ? host.ui.colorFor(category.type) : UiKit.MUTED;
+                return cell(host, Money.amount(state), stateColor, Typeface.BOLD, false, periodWidth, rowHeight, v -> showPeriodDetail(host, period.key, category.id));
             }
             if (category.type == CategoryType.LOAN && !hasFact && before <= 0) {
                 return cell(host, "—", UiKit.MUTED, Typeface.BOLD, false, periodWidth, rowHeight, v -> showPeriodDetail(host, period.key, category.id));
@@ -374,11 +381,11 @@ public class BalanceScreen implements AppScreen {
         return Money.amount(value);
     }
 
-    // нижняя строка таблицы с итоговым балансом по каждому периоду
+    // строка таблицы с итоговым балансом по каждому периоду
     private void addTotalRow(MainActivity host, TableLayout fixedTable, TableLayout scrollTable, List<PeriodChoice> periods, Map<String, PeriodBalance> balances, int firstColumnWidth, int periodWidth, int rowHeight) {
         TableRow fixedTotals = tableRow(host);
         fixedTotals.setBackgroundColor(Color.rgb(234, 252, 242));
-        fixedTotals.addView(cell(host, "ИТОГОВЫЙ БАЛАНС", UiKit.GREEN, Typeface.BOLD, true, firstColumnWidth, rowHeight, null));
+        fixedTotals.addView(cell(host, "БАЛАНС", UiKit.GREEN, Typeface.BOLD, true, firstColumnWidth, rowHeight, null));
         fixedTable.addView(fixedTotals);
 
         TableRow scrollTotals = tableRow(host);
@@ -464,11 +471,14 @@ public class BalanceScreen implements AppScreen {
         LinearLayout stats = host.ui.row();
         stats.setPadding(0, host.ui.dp(12), 0, host.ui.dp(12));
         // в верхних карточках тоже различаю серый план и цветной факт
-        stats.addView(statCard(host, "Доходы", Money.rub(balance.projectedIncome), balance.factIncome > 0 ? UiKit.GREEN : UiKit.MUTED), new LinearLayout.LayoutParams(0, host.ui.dp(86), 1));
+        double visibleIncome = balance.projectedIncome + balance.projectedLoanReceive;
+        // в карточке доходов показываю заем как поступление, сам баланс его отдельно уже считает
+        stats.addView(statCard(host, "Доходы", Money.rub(visibleIncome), balance.factIncome > 0 || balance.factLoanReceive > 0 ? UiKit.GREEN : UiKit.MUTED), new LinearLayout.LayoutParams(0, host.ui.dp(86), 1));
+        host.ui.gap(stats, 10, false);
+        // баланс ставлю посередине, так глазами проще сравнить его с доходами и расходами
+        stats.addView(statCard(host, "Баланс", Money.rub(balance.closingBalance), UiKit.BLUE), new LinearLayout.LayoutParams(0, host.ui.dp(86), 1));
         host.ui.gap(stats, 10, false);
         stats.addView(statCard(host, "Расходы", Money.rub(balance.projectedExpense), balance.factExpense > 0 ? UiKit.RED : UiKit.MUTED), new LinearLayout.LayoutParams(0, host.ui.dp(86), 1));
-        host.ui.gap(stats, 10, false);
-        stats.addView(statCard(host, "Остаток", Money.rub(balance.closingBalance), UiKit.BLUE), new LinearLayout.LayoutParams(0, host.ui.dp(86), 1));
         content.addView(stats);
         LinearLayout extendedStats = host.ui.row();
         extendedStats.setPadding(0, 0, 0, host.ui.dp(12));
@@ -543,6 +553,14 @@ public class BalanceScreen implements AppScreen {
             rowsBox.addView(categoryRow(host, category, plan, fact, range));
             rows++;
         }
+        if (type == CategoryType.INCOME) {
+            double loanReceive = host.calculator.factActionForRange(CategoryType.LOAN, FactAction.LOAN_RECEIVE, range);
+            if (loanReceive > 0) {
+                // взятие займа показываю доходной строкой, хотя в базе это все равно статья займа
+                rowsBox.addView(syntheticDetailRow(host, "Взятие займа", "Факт: " + Money.rub(loanReceive), Money.rub(loanReceive), UiKit.GREEN));
+                rows++;
+            }
+        }
         if (rows == 0) return 0;
         // пустые разделы в деталях не вывожу, иначе экран превращается в список "нет записей"
         TextView section = host.ui.label(title, 16, host.ui.colorFor(type), Typeface.BOLD);
@@ -550,6 +568,23 @@ public class BalanceScreen implements AppScreen {
         parent.addView(section);
         parent.addView(rowsBox);
         return rows;
+    }
+
+    // строка для служебного дохода/расхода, которому не нужна отдельная категория в настройках
+    private View syntheticDetailRow(MainActivity host, String title, String subtitle, String amount, int color) {
+        LinearLayout row = host.ui.row();
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, host.ui.dp(10), 0, 0);
+        row.addView(host.ui.circleIcon("₽", color), new LinearLayout.LayoutParams(host.ui.dp(36), host.ui.dp(36)));
+        host.ui.gap(row, 10, false);
+        LinearLayout texts = host.ui.column();
+        texts.addView(host.ui.label(title, 15, UiKit.INK, Typeface.BOLD));
+        texts.addView(host.ui.label(subtitle, 12, color, Typeface.NORMAL));
+        row.addView(texts, new LinearLayout.LayoutParams(0, -2, 1));
+        row.addView(host.ui.label(amount, 15, UiKit.INK, Typeface.BOLD));
+        host.ui.gap(row, 10, false);
+        row.addView(host.ui.tag("факт", UiKit.BLUE), new LinearLayout.LayoutParams(host.ui.dp(58), host.ui.dp(30)));
+        return row;
     }
 
     // строка статьи в деталях периода
@@ -607,16 +642,15 @@ public class BalanceScreen implements AppScreen {
         DateRange range = Periods.rangeForKey(periodKey);
         PeriodChoice period = new PeriodChoice(periodKey, Periods.label(periodKey), Periods.shortLabel(periodKey), range.start, range.end);
         double calculated = balanceFor(host, period).closingBalance;
-        if (host.reconcileRealDraft == null || host.reconcileRealDraft.isEmpty()) {
-            host.reconcileRealDraft = Money.amount(calculated);
-        }
-        double real = Money.parse(host.reconcileRealDraft);
+        boolean hasRealInput = host.reconcileRealDraft != null && !host.reconcileRealDraft.trim().isEmpty();
+        // если поле пустое, не подставляю расчетный баланс, иначе минусовой баланс выглядел как "все ок"
+        double real = hasRealInput ? Money.parse(host.reconcileRealDraft) : 0;
         double diff = real - calculated;
         UiKit.Screen screen = host.ui.screen("бюджет", "Сверка", Periods.label(periodKey), host.ui.iconButton("‹", v -> showPeriodDetail(host, periodKey)), NavTarget.BALANCE, host);
         LinearLayout card = host.ui.card();
         card.addView(host.ui.label("Баланс периода", 18, UiKit.INK, Typeface.BOLD));
         card.addView(summaryRow(host, "Расчетный баланс", Money.rub(calculated), UiKit.INK));
-        EditText realInput = host.ui.editField("", host.reconcileRealDraft, 18, false);
+        EditText realInput = host.ui.editField("", hasRealInput ? host.reconcileRealDraft : "", 18, false);
         realInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL | InputType.TYPE_NUMBER_FLAG_SIGNED);
         card.addView(inputRow(host, "Реальный остаток", realInput));
         TextView difference = host.ui.label(Money.rub(diff), 20, diff < 0 ? host.ui.negativeColor(host.repository.data().negativeBalanceColor) : UiKit.GREEN, Typeface.BOLD);
@@ -632,7 +666,10 @@ public class BalanceScreen implements AppScreen {
             }
         });
         screen.content.addView(card);
-        screen.content.addView(host.ui.warningCard(diff == 0 ? "Расхождений нет" : "Обнаружено расхождение", diff == 0 ? "Реальный остаток совпадает с расчетным балансом." : "Разница считается как реальный остаток минус расчетный баланс."));
+        boolean hasDifference = Math.abs(diff) >= 0.01;
+        String reconcileTitle = hasDifference ? "Обнаружено расхождение" : "Расхождений нет";
+        String reconcileText = hasDifference ? "Разница считается как реальный остаток минус расчетный баланс." : "Реальный остаток совпадает с расчетным балансом.";
+        screen.content.addView(host.ui.warningCard(reconcileTitle, reconcileText));
         LinearLayout actions = host.ui.row();
         actions.setPadding(0, host.ui.dp(12), 0, 0);
         actions.addView(host.ui.outlineButton("Исправить вручную", v -> openFactForPeriod(host, periodKey, null)), new LinearLayout.LayoutParams(0, host.ui.dp(60), 1));
@@ -669,6 +706,10 @@ public class BalanceScreen implements AppScreen {
 
     // быстрая корректировка, факт на разницу
     private void applyReconcileCorrection(MainActivity host, String periodKey, double calculated) {
+        if (host.reconcileRealDraft == null || host.reconcileRealDraft.trim().isEmpty()) {
+            host.toast("Введите реальный остаток");
+            return;
+        }
         double real = Money.parse(host.reconcileRealDraft);
         double difference = real - calculated;
         if (Math.abs(difference) < 0.01) {
@@ -696,7 +737,7 @@ public class BalanceScreen implements AppScreen {
 
     // открываю вкладку факта сразу с нужным периодом
     private void openFactForPeriod(MainActivity host, String periodKey, String categoryId) {
-        host.factPeriodKey = periodKey;
+        host.setFactPeriod(periodKey);
         // если детализация открыта из ячейки статьи, в факте сразу ставлю эту статью
         if (categoryId != null && host.repository.findCategory(categoryId) != null) {
             host.factCategoryId = categoryId;
@@ -707,7 +748,7 @@ public class BalanceScreen implements AppScreen {
 
     // для кнопки "+ внести факт" беру текущий период из настроек
     private void openCurrentFact(MainActivity host) {
-        host.factPeriodKey = Periods.factKey(LocalDate.now(), host.repository.data().periodKind);
+        host.setFactDate(LocalDate.now());
         host.showFact();
     }
 
@@ -770,11 +811,14 @@ public class BalanceScreen implements AppScreen {
 
     // стиль ячейки, чтоб таблица была одинаковая
     private TextView cell(MainActivity host, String text, int color, int style, boolean left, int widthDp, int heightDp, View.OnClickListener listener) {
-        TextView cell = host.ui.label(text, 13, color, style);
+        TextView cell = host.ui.label(text, 12, color, style);
         cell.setGravity(left ? Gravity.CENTER_VERTICAL : Gravity.CENTER);
         cell.setSingleLine(false);
-        cell.setMaxLines(3);
-        cell.setPadding(host.ui.dp(8), host.ui.dp(9), host.ui.dp(8), host.ui.dp(9));
+        // длинные статьи не должны раздувать строку, пусть лучше аккуратно обрежутся
+        cell.setMaxLines(2);
+        cell.setEllipsize(TextUtils.TruncateAt.END);
+        cell.setIncludeFontPadding(false);
+        cell.setPadding(host.ui.dp(7), host.ui.dp(5), host.ui.dp(7), host.ui.dp(5));
         TableRow.LayoutParams params = new TableRow.LayoutParams(host.ui.dp(widthDp), host.ui.dp(heightDp));
         cell.setLayoutParams(params);
         cell.setMinWidth(host.ui.dp(widthDp));

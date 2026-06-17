@@ -7,7 +7,6 @@ import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.EditText;
-import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -40,22 +39,23 @@ public class SettingsScreen implements AppScreen {
         addLp.setMargins(0, host.ui.dp(14), 0, 0);
         content.addView(host.ui.primaryButton("+ Добавить статью", v -> showCategoryDialog(host, null)), addLp);
 
-        HorizontalScrollView filterScroll = new HorizontalScrollView(host);
-        // фильтры отдельно от карточки, как на экране дизайнера
-        filterScroll.setHorizontalScrollBarEnabled(false);
-        LinearLayout filters = host.ui.row();
+        LinearLayout filters = host.ui.column();
+        // фильтры разбил на две строки, иначе на телефоне видны только доходы и расходы
         filters.setPadding(0, host.ui.dp(14), 0, host.ui.dp(12));
-        filters.addView(filter(host, "Все", host.categoryFilter == null, () -> host.categoryFilter = null), new LinearLayout.LayoutParams(host.ui.dp(86), host.ui.dp(44)));
-        host.ui.gap(filters, 8, false);
-        filters.addView(filter(host, "Доходы", host.categoryFilter == CategoryType.INCOME, () -> host.categoryFilter = CategoryType.INCOME), new LinearLayout.LayoutParams(host.ui.dp(106), host.ui.dp(44)));
-        host.ui.gap(filters, 8, false);
-        filters.addView(filter(host, "Расходы", host.categoryFilter == CategoryType.EXPENSE, () -> host.categoryFilter = CategoryType.EXPENSE), new LinearLayout.LayoutParams(host.ui.dp(112), host.ui.dp(44)));
-        host.ui.gap(filters, 8, false);
-        filters.addView(filter(host, "Депозиты", host.categoryFilter == CategoryType.DEPOSIT, () -> host.categoryFilter = CategoryType.DEPOSIT), new LinearLayout.LayoutParams(host.ui.dp(112), host.ui.dp(44)));
-        host.ui.gap(filters, 8, false);
-        filters.addView(filter(host, "Займы", host.categoryFilter == CategoryType.LOAN, () -> host.categoryFilter = CategoryType.LOAN), new LinearLayout.LayoutParams(host.ui.dp(96), host.ui.dp(44)));
-        filterScroll.addView(filters, new HorizontalScrollView.LayoutParams(-2, -2));
-        content.addView(filterScroll);
+        LinearLayout firstFilterRow = host.ui.row();
+        firstFilterRow.addView(filter(host, "Все", host.categoryFilter == null, () -> host.categoryFilter = null), new LinearLayout.LayoutParams(0, host.ui.dp(44), 1));
+        host.ui.gap(firstFilterRow, 8, false);
+        firstFilterRow.addView(filter(host, "Доходы", host.categoryFilter == CategoryType.INCOME, () -> host.categoryFilter = CategoryType.INCOME), new LinearLayout.LayoutParams(0, host.ui.dp(44), 1));
+        host.ui.gap(firstFilterRow, 8, false);
+        firstFilterRow.addView(filter(host, "Расходы", host.categoryFilter == CategoryType.EXPENSE, () -> host.categoryFilter = CategoryType.EXPENSE), new LinearLayout.LayoutParams(0, host.ui.dp(44), 1));
+        filters.addView(firstFilterRow);
+        LinearLayout secondFilterRow = host.ui.row();
+        secondFilterRow.setPadding(0, host.ui.dp(8), 0, 0);
+        secondFilterRow.addView(filter(host, "Депозиты", host.categoryFilter == CategoryType.DEPOSIT, () -> host.categoryFilter = CategoryType.DEPOSIT), new LinearLayout.LayoutParams(0, host.ui.dp(44), 1));
+        host.ui.gap(secondFilterRow, 8, false);
+        secondFilterRow.addView(filter(host, "Займы", host.categoryFilter == CategoryType.LOAN, () -> host.categoryFilter = CategoryType.LOAN), new LinearLayout.LayoutParams(0, host.ui.dp(44), 1));
+        filters.addView(secondFilterRow);
+        content.addView(filters);
 
         LinearLayout card = host.ui.card();
         addCategorySection(host, card, "ДОХОДЫ", CategoryType.INCOME);

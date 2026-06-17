@@ -145,16 +145,26 @@ public class BudgetCalculator {
 
     // план в ячейке: статья + период
     public double planAmount(String categoryId, String periodKey) {
+        return planAmount(categoryId, periodKey, null);
+    }
+
+    // для займов и депозитов план делю по действию, иначе получение займа путается с погашением
+    public double planAmount(String categoryId, String periodKey, FactAction action) {
         for (PlanEntry plan : repository.data().plans) {
-            if (plan.categoryId.equals(categoryId) && plan.periodKey.equals(periodKey)) return plan.amount;
+            if (plan.categoryId.equals(categoryId) && plan.periodKey.equals(periodKey) && planActionMatches(categoryId, plan, action) && !skipLoanReceiveContinuation(plan)) return plan.amount;
         }
         return 0;
     }
 
     // коммент плана хранится по тому же ключу
     public String planComment(String categoryId, String periodKey) {
+        return planComment(categoryId, periodKey, null);
+    }
+
+    // комментарий тоже достаю по действию, чтобы у кредита было отдельно получение и погашение
+    public String planComment(String categoryId, String periodKey, FactAction action) {
         for (PlanEntry plan : repository.data().plans) {
-            if (plan.categoryId.equals(categoryId) && plan.periodKey.equals(periodKey)) return plan.comment;
+            if (plan.categoryId.equals(categoryId) && plan.periodKey.equals(periodKey) && planActionMatches(categoryId, plan, action) && !skipLoanReceiveContinuation(plan)) return plan.comment;
         }
         return "";
     }
@@ -164,7 +174,7 @@ public class BudgetCalculator {
         double sum = 0;
         for (PlanEntry plan : repository.data().plans) {
             Category category = repository.findCategory(plan.categoryId);
-            if (category != null && category.type == type && plan.periodKey.equals(periodKey)) sum += plan.amount;
+            if (category != null && category.type == type && plan.periodKey.equals(periodKey) && !skipLoanReceiveContinuation(plan)) sum += plan.amount;
         }
         return sum;
     }
@@ -173,7 +183,16 @@ public class BudgetCalculator {
     public double planForRange(String categoryId, DateRange range) {
         double sum = 0;
         for (PlanEntry plan : repository.data().plans) {
-            if (plan.categoryId.equals(categoryId)) sum += proratedPlanAmount(plan, range);
+            if (plan.categoryId.equals(categoryId) && !skipLoanReceiveContinuation(plan)) sum += proratedPlanAmount(plan, range);
+        }
+        return sum;
+    }
+
+    // такой же расчет, но только по одному действию займа/депозита
+    public double planForRange(String categoryId, DateRange range, FactAction action) {
+        double sum = 0;
+        for (PlanEntry plan : repository.data().plans) {
+            if (plan.categoryId.equals(categoryId) && planActionMatches(categoryId, plan, action) && !skipLoanReceiveContinuation(plan)) sum += proratedPlanAmount(plan, range);
         }
         return sum;
     }
@@ -184,6 +203,19 @@ public class BudgetCalculator {
         for (PlanEntry plan : repository.data().plans) {
             Category category = repository.findCategory(plan.categoryId);
             if (category == null || category.type != type) continue;
+            if (skipLoanReceiveContinuation(plan)) continue;
+            sum += proratedPlanAmount(plan, range);
+        }
+        return sum;
+    }
+
+    // по типу и действию нужно для сводки займов: получение отдельно, погашение отдельно
+    public double planForRange(CategoryType type, DateRange range, FactAction action) {
+        double sum = 0;
+        for (PlanEntry plan : repository.data().plans) {
+            Category category = repository.findCategory(plan.categoryId);
+            if (category == null || category.type != type || !planActionMatches(category.id, plan, action)) continue;
+            if (skipLoanReceiveContinuation(plan)) continue;
             sum += proratedPlanAmount(plan, range);
         }
         return sum;
@@ -236,8 +268,8 @@ public class BudgetCalculator {
         balance.openingDebt = openingDebt;
         balance.planIncome = planForRange(CategoryType.INCOME, balance.range);
         balance.planExpense = planForRange(CategoryType.EXPENSE, balance.range);
-        balance.planDeposit = planForRange(CategoryType.DEPOSIT, balance.range);
-        balance.planLoan = planForRange(CategoryType.LOAN, balance.range);
+        balance.planDeposit = planForRange(CategoryType.DEPOSIT, balance.range, FactAction.DEPOSIT_ADD);
+        balance.planLoan = planForRange(CategoryType.LOAN, balance.range, FactAction.LOAN_RECEIVE) - planForRange(CategoryType.LOAN, balance.range, FactAction.LOAN_REPAY);
         balance.factIncome = factForRange(CategoryType.INCOME, balance.range);
         balance.factExpense = factForRange(CategoryType.EXPENSE, balance.range);
         balance.factDepositAdd = factActionForRange(CategoryType.DEPOSIT, FactAction.DEPOSIT_ADD, balance.range);
@@ -322,9 +354,14 @@ public class BudgetCalculator {
 
     // сохраняю план ячейки, старый дубль убираю
     public void setPlanAmount(String categoryId, String periodKey, double amount, String comment) {
+        setPlanAmount(categoryId, periodKey, amount, comment, null);
+    }
+
+    // сохраняю план с действием, чтобы кредит можно было и получить, и погасить в разных строках
+    public void setPlanAmount(String categoryId, String periodKey, double amount, String comment, FactAction action) {
         for (int i = repository.data().plans.size() - 1; i >= 0; i--) {
             PlanEntry plan = repository.data().plans.get(i);
-            if (plan.categoryId.equals(categoryId) && plan.periodKey.equals(periodKey)) {
+            if (plan.categoryId.equals(categoryId) && plan.periodKey.equals(periodKey) && planActionMatches(categoryId, plan, action)) {
                 repository.data().plans.remove(i);
             }
         }
@@ -333,6 +370,7 @@ public class BudgetCalculator {
             PlanEntry plan = new PlanEntry();
             plan.categoryId = categoryId;
             plan.periodKey = periodKey;
+            plan.action = action == null ? "" : action.name();
             plan.amount = amount;
             plan.comment = comment == null ? "" : comment;
             repository.data().plans.add(plan);
@@ -396,22 +434,53 @@ public class BudgetCalculator {
         } else if (category.type == CategoryType.DEPOSIT) {
             double added = factByActionForCategory(category.id, FactAction.DEPOSIT_ADD, balance.range);
             double withdrawn = factByActionForCategory(category.id, FactAction.DEPOSIT_WITHDRAW, balance.range);
-            if (added > 0 || withdrawn > 0) {
-                balance.projectedDepositAdd += added;
-                balance.projectedDepositWithdraw += withdrawn;
-            } else {
-                balance.projectedDepositAdd += planForRange(category.id, balance.range);
-            }
+            // факт должен затирать только свое действие, а не весь депозит за неделю
+            balance.projectedDepositAdd += added > 0 ? added : planForRange(category.id, balance.range, FactAction.DEPOSIT_ADD);
+            balance.projectedDepositWithdraw += withdrawn;
         } else if (category.type == CategoryType.LOAN) {
             double received = factByActionForCategory(category.id, FactAction.LOAN_RECEIVE, balance.range);
             double repaid = factByActionForCategory(category.id, FactAction.LOAN_REPAY, balance.range);
-            if (received > 0 || repaid > 0) {
-                balance.projectedLoanReceive += received;
-                balance.projectedLoanRepay += repaid;
-            } else {
-                balance.projectedLoanRepay += planForRange(category.id, balance.range);
-            }
+            // получение займа и погашение считаю отдельно, чтобы факт одного не стирал план второго
+            balance.projectedLoanReceive += received > 0 ? received : planForRange(category.id, balance.range, FactAction.LOAN_RECEIVE);
+            balance.projectedLoanRepay += repaid > 0 ? repaid : planForRange(category.id, balance.range, FactAction.LOAN_REPAY);
         }
+    }
+
+    // если раньше кредит разнесли "на все периоды", тут глушу такие хвосты, чтобы займ не брался каждую неделю
+    private boolean skipLoanReceiveContinuation(PlanEntry plan) {
+        if (!planActionMatches(plan.categoryId, plan, FactAction.LOAN_RECEIVE)) return false;
+        Category category = repository.findCategory(plan.categoryId);
+        if (category == null || category.type != CategoryType.LOAN) return false;
+        DateRange current = Periods.rangeForKey(plan.periodKey);
+        for (PlanEntry previous : repository.data().plans) {
+            if (previous == plan) continue;
+            if (!previous.categoryId.equals(plan.categoryId)) continue;
+            if (!planActionMatches(previous.categoryId, previous, FactAction.LOAN_RECEIVE)) continue;
+            if (Math.abs(previous.amount - plan.amount) >= 0.01) continue;
+            if (!sameComment(previous.comment, plan.comment)) continue;
+            DateRange previousRange = Periods.rangeForKey(previous.periodKey);
+            if (previousRange.end.plusDays(1).equals(current.start)) return true;
+        }
+        return false;
+    }
+
+    // комментарий тоже сравниваю, чтобы случайно не склеить два разных плановых займа
+    private boolean sameComment(String first, String second) {
+        String left = first == null ? "" : first.trim();
+        String right = second == null ? "" : second.trim();
+        return left.equals(right);
+    }
+
+    // старые записи без action считаю погашением кредита/пополнением депозита, чтобы база не сломалась
+    private boolean planActionMatches(String categoryId, PlanEntry plan, FactAction action) {
+        String saved = plan.action == null ? "" : plan.action;
+        if (action == null) return saved.isEmpty();
+        if (saved.equals(action.name())) return true;
+        if (!saved.isEmpty()) return false;
+        Category category = repository.findCategory(categoryId);
+        if (category == null) return false;
+        if (category.type == CategoryType.DEPOSIT && action == FactAction.DEPOSIT_ADD) return true;
+        return category.type == CategoryType.LOAN && action == FactAction.LOAN_REPAY;
     }
 
     // по id и действию достаю только нужный кусок факта
@@ -419,16 +488,19 @@ public class BudgetCalculator {
     private double projectedDepositState(String categoryId, double amount, DateRange range) {
         double added = factByActionForCategory(categoryId, FactAction.DEPOSIT_ADD, range);
         double withdrawn = factByActionForCategory(categoryId, FactAction.DEPOSIT_WITHDRAW, range);
-        if (added > 0 || withdrawn > 0) return amount + added - withdrawn;
-        return amount + planForRange(categoryId, range);
+        // состояние накоплений тяну дальше, план пополнения заменяется только фактом пополнения
+        double plannedAdd = added > 0 ? added : planForRange(categoryId, range, FactAction.DEPOSIT_ADD);
+        return amount + plannedAdd - withdrawn;
     }
 
-    // для кредита план трактую как погашение, потому что получение займа вносится фактом
+    // для кредита отдельно тащу получение и погашение, иначе график платежей ломается
     private double projectedLoanState(String categoryId, double amount, DateRange range) {
         double received = factByActionForCategory(categoryId, FactAction.LOAN_RECEIVE, range);
         double repaid = factByActionForCategory(categoryId, FactAction.LOAN_REPAY, range);
-        if (received > 0 || repaid > 0) return amount + received - repaid;
-        return amount - planForRange(categoryId, range);
+        // долг тянется по периодам: получение и погашение заменяются фактами отдельно
+        double plannedReceive = received > 0 ? received : planForRange(categoryId, range, FactAction.LOAN_RECEIVE);
+        double plannedRepay = repaid > 0 ? repaid : planForRange(categoryId, range, FactAction.LOAN_REPAY);
+        return amount + plannedReceive - plannedRepay;
     }
 
     private double factByActionForCategory(String categoryId, FactAction action, DateRange range) {

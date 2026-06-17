@@ -77,6 +77,7 @@ public class MainActivity extends Activity implements NavListener {
     public String balancePeriodKey;
     public String planPeriodKey;
     public String factPeriodKey;
+    public LocalDate factDate = LocalDate.now();
     public String factCategoryId;
     public FactAction factAction = FactAction.NONE;
     public String factPayment = "Карта";
@@ -132,6 +133,11 @@ public class MainActivity extends Activity implements NavListener {
         String factPrefix = repository.data().periodKind == ru.textayga.mobile.model.PeriodKind.WEEK ? "W:" : "M:";
         if (factPeriodKey == null || !factPeriodKey.startsWith(factPrefix)) {
             factPeriodKey = Periods.factKey(today, repository.data().periodKind);
+        }
+        DateRange factRange = Periods.rangeForKey(factPeriodKey);
+        if (factDate == null || !factRange.contains(factDate)) {
+            // дату факта держу отдельно, иначе старые операции вставали на начало недели
+            factDate = factRange.contains(today) ? today : factRange.start;
         }
         if (factCategoryId == null || repository.findCategory(factCategoryId) == null) {
             // если статья не выбрана или была удалена, ставлю первый расход
@@ -230,6 +236,26 @@ public class MainActivity extends Activity implements NavListener {
         dialogs.periods(title, choices, selected, callback);
     }
 
+    public void setFactPeriod(String periodKey) {
+        factPeriodKey = periodKey;
+        DateRange range = Periods.rangeForKey(periodKey);
+        LocalDate today = LocalDate.now();
+        // при смене периода оставляю дату внутри него, иначе факт потом может улететь не туда
+        if (factDate == null || !range.contains(factDate)) {
+            factDate = range.contains(today) ? today : range.start;
+        }
+    }
+
+    public void setFactDate(LocalDate date) {
+        if (date.isAfter(LocalDate.now())) {
+            // факт на будущее не даю ставить, это уже планирование, а не реальная операция
+            date = LocalDate.now();
+        }
+        factDate = date;
+        // период пересобираю от даты, чтобы 9 мая не сохранялось как 4 мая
+        factPeriodKey = Periods.factKey(date, repository.data().periodKind);
+    }
+
     // обертка над диалогами, чтоб не дергать appdialogs везде
     public void showChoiceDialog(String title, String[] labels, AppDialogs.ChoiceCallback callback) {
         dialogs.choices(title, labels, callback);
@@ -282,7 +308,6 @@ public class MainActivity extends Activity implements NavListener {
         Category category = repository.findCategory(factCategoryId);
         double amount = Money.parse(factAmountDraft);
         DateRange range = Periods.rangeForKey(factPeriodKey);
-        LocalDate today = LocalDate.now();
         if (category == null) {
             toast("Выберите статью");
             return;
@@ -297,7 +322,11 @@ public class MainActivity extends Activity implements NavListener {
         fact.categoryId = category.id;
         fact.categoryType = category.type;
         fact.periodKey = factPeriodKey;
-        fact.date = range.contains(today) ? today.toString() : range.start.toString();
+        if (factDate == null || !range.contains(factDate)) {
+            // на всякий случай чиню дату перед сохранением, если экран пересобрался криво
+            factDate = range.contains(LocalDate.now()) ? LocalDate.now() : range.start;
+        }
+        fact.date = factDate.toString();
         fact.amount = amount;
         fact.payment = factPayment;
         fact.action = factAction;
