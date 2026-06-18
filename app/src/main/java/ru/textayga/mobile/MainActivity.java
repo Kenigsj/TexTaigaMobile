@@ -460,7 +460,8 @@ public class MainActivity extends Activity implements NavListener {
         String baseName = "TexTayga_" + range.start + "_" + range.end;
         try {
             if (exportFormat == ExportFormat.PDF) {
-                pendingExportBytes = exportBuilder.buildPdf(range);
+                // передаю те же галочки, что выбраны на экране выписки
+                pendingExportBytes = exportBuilder.buildPdf(range, includePlan, includeFact, includeBalance, includeComments);
                 pendingExportMime = "application/pdf";
                 pendingExportName = baseName + ".pdf";
             } else if (exportFormat == ExportFormat.CSV) {
@@ -468,7 +469,8 @@ public class MainActivity extends Activity implements NavListener {
                 pendingExportMime = "text/csv";
                 pendingExportName = baseName + ".csv";
             } else {
-                pendingExportBytes = exportBuilder.buildHtmlXls(range).getBytes(StandardCharsets.UTF_8);
+                // excel тоже должен собираться по выбранному составу
+                pendingExportBytes = exportBuilder.buildHtmlXls(range, includePlan, includeFact, includeBalance, includeComments).getBytes(StandardCharsets.UTF_8);
                 pendingExportMime = "application/vnd.ms-excel";
                 pendingExportName = baseName + ".xls";
             }

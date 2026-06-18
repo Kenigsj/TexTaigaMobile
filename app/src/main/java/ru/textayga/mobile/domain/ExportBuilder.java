@@ -9,6 +9,8 @@ import android.graphics.pdf.PdfDocument;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.LocalDate;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 import ru.textayga.mobile.data.BudgetRepository;
 import ru.textayga.mobile.model.Category;
@@ -70,74 +72,101 @@ public class ExportBuilder {
 
     // xls тут это html, который открывает excel
     public String buildHtmlXls(DateRange range) {
+        return buildHtmlXls(range, true, true, true, true);
+    }
+
+    // состав excel беру прямо из галочек на экране экспорта
+    public String buildHtmlXls(DateRange range, boolean includePlan, boolean includeFact, boolean includeBalance, boolean includeComments) {
         StringBuilder html = new StringBuilder();
         html.append("<html><head><meta charset=\"UTF-8\"></head><body>");
         html.append("<h2>TexTayga: выписка</h2>");
         html.append("<p>").append(Periods.fullDate(range.start)).append(" - ").append(Periods.fullDate(range.end)).append("</p>");
-        html.append("<table border=\"1\"><tr><th>Раздел</th><th>Статья</th><th>План</th><th>Факт</th></tr>");
-        for (Category category : repository.data().categories) {
-            if (category.archived) continue;
-            double plan = calculator.planForRange(category.id, range);
-            double fact = calculator.factNetForRange(category.id, range);
-            boolean hasFact = calculator.hasFactForRange(category.id, range);
-            if (plan == 0 && !hasFact) continue;
-            html.append("<tr><td>").append(htmlEscape(category.type.title)).append("</td><td>").append(htmlEscape(category.name)).append("</td><td>")
-                    .append(plan == 0 ? "—" : Money.amount(plan)).append("</td><td>").append(exportFactText(category, fact, hasFact)).append("</td></tr>");
+        boolean hasRows = hasExportRows(range, includePlan, includeFact, includeComments);
+        if (hasRows) {
+            html.append("<table border=\"1\"><tr><th>Раздел</th><th>Статья</th>");
+            if (includePlan) html.append("<th>План</th>");
+            if (includeFact) html.append("<th>Факт</th>");
+            if (includeComments) html.append("<th>Комментарий</th>");
+            html.append("</tr>");
+            for (Category category : repository.data().categories) {
+                if (category.archived || !shouldExportCategory(category, range, includePlan, includeFact, includeComments)) continue;
+                double plan = calculator.planForRange(category.id, range);
+                double fact = calculator.factNetForRange(category.id, range);
+                boolean hasFact = calculator.hasFactForRange(category.id, range);
+                html.append("<tr><td>").append(htmlEscape(category.type.title)).append("</td><td>").append(htmlEscape(category.name)).append("</td>");
+                if (includePlan) html.append("<td>").append(plan == 0 ? "—" : Money.amount(plan)).append("</td>");
+                if (includeFact) html.append("<td>").append(exportFactText(category, fact, hasFact)).append("</td>");
+                if (includeComments) html.append("<td>").append(htmlEscape(commentsForRange(category, range, includePlan, includeFact))).append("</td>");
+                html.append("</tr>");
+            }
+            html.append("</table>");
         }
-        html.append("</table>");
-        html.append("<h3>Баланс по периодам</h3><table border=\"1\"><tr><th>Период</th><th>Доходы</th><th>Расходы</th><th>Депозиты</th><th>Займы</th><th>Накопления</th><th>Задолженность</th><th>Итоговый баланс</th></tr>");
-        for (PeriodBalance balance : calculator.balanceSeries(Periods.weeksBetween(range.start, range.end))) {
-            if (!range.intersects(balance.range)) continue;
-            // таблицу в excel расширил под новую формулу доступного баланса
-            html.append("<tr><td>").append(htmlEscape(balance.label)).append("</td><td>")
-                    .append(Money.amount(balance.projectedIncome)).append("</td><td>")
-                    .append(Money.amount(balance.projectedExpense)).append("</td><td>")
-                    .append(Money.amount(balance.projectedDepositAdd - balance.projectedDepositWithdraw)).append("</td><td>")
-                    .append(Money.amount(balance.projectedLoanReceive - balance.projectedLoanRepay)).append("</td><td>")
-                    .append(Money.amount(balance.closingSavings)).append("</td><td>")
-                    .append(Money.amount(balance.closingDebt)).append("</td><td>")
-                    .append(Money.amount(balance.closingBalance)).append("</td></tr>");
+        if (includeBalance) {
+            html.append("<h3>Баланс по периодам</h3><table border=\"1\"><tr><th>Период</th><th>Доходы</th><th>Расходы</th><th>Депозиты</th><th>Займы</th><th>Накопления</th><th>Задолженность</th><th>Итоговый баланс</th></tr>");
+            for (PeriodBalance balance : calculator.balanceSeries(Periods.weeksBetween(range.start, range.end))) {
+                if (!range.intersects(balance.range)) continue;
+                // таблицу в excel расширил под новую формулу доступного баланса
+                html.append("<tr><td>").append(htmlEscape(balance.label)).append("</td><td>")
+                        .append(Money.amount(balance.projectedIncome)).append("</td><td>")
+                        .append(Money.amount(balance.projectedExpense)).append("</td><td>")
+                        .append(Money.amount(balance.projectedDepositAdd - balance.projectedDepositWithdraw)).append("</td><td>")
+                        .append(Money.amount(balance.projectedLoanReceive - balance.projectedLoanRepay)).append("</td><td>")
+                        .append(Money.amount(balance.closingSavings)).append("</td><td>")
+                        .append(Money.amount(balance.closingDebt)).append("</td><td>")
+                        .append(Money.amount(balance.closingBalance)).append("</td></tr>");
+            }
+            html.append("</table>");
         }
-        html.append("</table></body></html>");
+        if (!hasRows && !includeBalance) html.append("<p>Состав выписки не выбран.</p>");
+        html.append("</body></html>");
         return html.toString();
     }
 
     // pdf рисую через canvas
     public byte[] buildPdf(DateRange range) throws IOException {
+        return buildPdf(range, true, true, true, true);
+    }
+
+    // pdf теперь использует тот же набор галочек, что csv и excel
+    public byte[] buildPdf(DateRange range, boolean includePlan, boolean includeFact, boolean includeBalance, boolean includeComments) throws IOException {
         PdfDocument document = new PdfDocument();
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         int pageNumber = 1;
         PdfDocument.Page page = startPdfPage(document, pageNumber);
         Canvas canvas = page.getCanvas();
         int y = drawPdfHeader(canvas, paint, range);
-        y = drawPdfTableHeader(canvas, paint, y);
+        boolean hasRows = hasExportRows(range, includePlan, includeFact, includeComments);
+        if (hasRows) y = drawPdfTableHeader(canvas, paint, y, includePlan, includeFact, includeComments);
         for (Category category : repository.data().categories) {
-            if (category.archived) continue;
+            if (category.archived || !shouldExportCategory(category, range, includePlan, includeFact, includeComments)) continue;
             double plan = calculator.planForRange(category.id, range);
             double fact = calculator.factNetForRange(category.id, range);
             boolean hasFact = calculator.hasFactForRange(category.id, range);
-            if (plan == 0 && !hasFact) continue;
             if (y > 790) {
                 // если строки закончились по высоте, продолжаю на новом листе
                 document.finishPage(page);
                 page = startPdfPage(document, ++pageNumber);
                 canvas = page.getCanvas();
                 y = drawPdfHeader(canvas, paint, range);
-                y = drawPdfTableHeader(canvas, paint, y);
+                y = drawPdfTableHeader(canvas, paint, y, includePlan, includeFact, includeComments);
             }
-            drawPdfCategoryRow(canvas, paint, category, plan, fact, hasFact, y);
+            drawPdfCategoryRow(canvas, paint, category, plan, fact, hasFact, range, y, includePlan, includeFact, includeComments);
             y += 24;
         }
-        if (y > 750) {
+        if (includeBalance && y > 750) {
             // сводку лучше перенести, чем лепить в самый низ страницы
             document.finishPage(page);
             page = startPdfPage(document, ++pageNumber);
             canvas = page.getCanvas();
             y = drawPdfHeader(canvas, paint, range);
-        } else {
+        } else if (includeBalance) {
             y += 16;
         }
-        drawPdfSummary(canvas, paint, range, y);
+        if (includeBalance) {
+            drawPdfSummary(canvas, paint, range, y);
+        } else if (!hasRows) {
+            drawPdfEmptyMessage(canvas, paint, y);
+        }
         document.finishPage(page);
 
         ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -166,14 +195,22 @@ public class ExportBuilder {
     }
 
     // заголовки таблицы pdf
-    private int drawPdfTableHeader(Canvas canvas, Paint paint, int y) {
+    private int drawPdfTableHeader(Canvas canvas, Paint paint, int y, boolean includePlan, boolean includeFact, boolean includeComments) {
         paint.setTextSize(13);
         paint.setColor(INK);
         paint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
         canvas.drawText("Статья", 42, y, paint);
-        canvas.drawText("План", 230, y, paint);
-        canvas.drawText("Факт", 330, y, paint);
-        canvas.drawText("Тип", 430, y, paint);
+        canvas.drawText("Тип", 200, y, paint);
+        int x = 300;
+        if (includePlan) {
+            canvas.drawText("План", x, y, paint);
+            x += 75;
+        }
+        if (includeFact) {
+            canvas.drawText("Факт", x, y, paint);
+            x += 75;
+        }
+        if (includeComments) canvas.drawText("Комментарий", x, y, paint);
         y += 12;
         paint.setStrokeWidth(1);
         paint.setColor(LINE);
@@ -182,15 +219,35 @@ public class ExportBuilder {
     }
 
     // одна строка статьи в pdf
-    private void drawPdfCategoryRow(Canvas canvas, Paint paint, Category category, double plan, double fact, boolean hasFact, int y) {
+    private void drawPdfCategoryRow(Canvas canvas, Paint paint, Category category, double plan, double fact, boolean hasFact,
+                                    DateRange range, int y, boolean includePlan, boolean includeFact, boolean includeComments) {
         paint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL));
         paint.setTextSize(12);
         paint.setColor(INK);
-        canvas.drawText(trim(category.name, 24), 42, y, paint);
+        canvas.drawText(trim(category.name, 22), 42, y, paint);
         paint.setColor(colorFor(category.type.title));
-        canvas.drawText(plan == 0 ? "—" : Money.amount(plan), 230, y, paint);
-        canvas.drawText(exportFactText(category, fact, hasFact), 330, y, paint);
-        canvas.drawText(category.type.title, 430, y, paint);
+        canvas.drawText(category.type.title, 200, y, paint);
+        int x = 300;
+        if (includePlan) {
+            canvas.drawText(plan == 0 ? "—" : Money.amount(plan), x, y, paint);
+            x += 75;
+        }
+        if (includeFact) {
+            canvas.drawText(exportFactText(category, fact, hasFact), x, y, paint);
+            x += 75;
+        }
+        if (includeComments) {
+            paint.setColor(MUTED);
+            canvas.drawText(trim(commentsForRange(category, range, includePlan, includeFact), x >= 450 ? 15 : 25), x, y, paint);
+        }
+    }
+
+    // если пользователь снял все галочки, оставляю в pdf понятную надпись
+    private void drawPdfEmptyMessage(Canvas canvas, Paint paint, int y) {
+        paint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL));
+        paint.setTextSize(13);
+        paint.setColor(MUTED);
+        canvas.drawText("Состав выписки не выбран.", 42, y, paint);
     }
 
     // для файлов тоже показываю движение депозитов/займов со знаком
@@ -212,6 +269,51 @@ public class ExportBuilder {
         paint.setTextSize(12);
         paint.setColor(INK);
         canvas.drawText("Накопления: " + Money.rub(calculator.savingsUpTo(range.end)) + "   Задолженность: " + Money.rub(calculator.debtUpTo(range.end)), 42, y, paint);
+    }
+
+    // проверяю строки заранее, чтобы не рисовать пустую таблицу
+    private boolean hasExportRows(DateRange range, boolean includePlan, boolean includeFact, boolean includeComments) {
+        for (Category category : repository.data().categories) {
+            if (!category.archived && shouldExportCategory(category, range, includePlan, includeFact, includeComments)) return true;
+        }
+        return false;
+    }
+
+    // одна проверка нужна и excel, и pdf
+    private boolean shouldExportCategory(Category category, DateRange range, boolean includePlan, boolean includeFact, boolean includeComments) {
+        if (includePlan && hasPlanForRange(category.id, range)) return true;
+        if (includeFact && calculator.hasFactForRange(category.id, range)) return true;
+        return includeComments && !commentsForRange(category, range, includePlan, includeFact).isEmpty();
+    }
+
+    // отдельно ищу наличие плана, потому что сумма может быть нулевой после правок
+    private boolean hasPlanForRange(String categoryId, DateRange range) {
+        for (PlanEntry plan : repository.data().plans) {
+            if (plan.categoryId.equals(categoryId) && range.intersects(Periods.rangeForKey(plan.periodKey))) return true;
+        }
+        return false;
+    }
+
+    // одинаковые комментарии не повторяю по несколько раз в одной ячейке
+    private String commentsForRange(Category category, DateRange range, boolean includePlan, boolean includeFact) {
+        Set<String> comments = new LinkedHashSet<>();
+        addComment(comments, category.description);
+        if (includePlan) {
+            for (PlanEntry plan : repository.data().plans) {
+                if (plan.categoryId.equals(category.id) && range.intersects(Periods.rangeForKey(plan.periodKey))) addComment(comments, plan.comment);
+            }
+        }
+        if (includeFact) {
+            for (FactEntry fact : repository.data().facts) {
+                LocalDate date = LocalDate.parse(fact.date, Periods.ISO);
+                if (fact.categoryId.equals(category.id) && range.contains(date)) addComment(comments, fact.comment);
+            }
+        }
+        return String.join(" | ", comments);
+    }
+
+    private void addComment(Set<String> comments, String value) {
+        if (value != null && !value.trim().isEmpty()) comments.add(value.trim());
     }
 
     // плановые строки для csv
