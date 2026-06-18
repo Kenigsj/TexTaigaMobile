@@ -321,7 +321,8 @@ public class PlanScreen implements AppScreen {
     // автоматом ставлю погашение кредита по неделям, последний платеж режу по остатку
     private void scheduleLoanRepayments(MainActivity host, Category category, PeriodChoice selected, double loanAmount, double weeklyAmount, String comment) {
         if (weeklyAmount <= 0) return;
-        double remaining = host.calculator.projectedCategoryStateUpTo(category.id, selected.start.minusDays(1)) + loanAmount;
+        // график из этого окна считаю только для введенной суммы, старый долг сюда второй раз не подмешиваю
+        double remaining = loanAmount;
         for (PeriodChoice period : Periods.weeksBetween(selected.start, selected.start.plusWeeks(52))) {
             double payment = remaining > 0 ? Math.min(weeklyAmount, remaining) : 0;
             // когда кредит уже закрыт, на будущих неделях стираю старый план погашения
